@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 type pes_stream struct {

@@ -6,9 +6,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // ConvertFLVToFMP4 remuxes a flv file into a fragmented mp4.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // This is the transport the interleaved client cannot cover. Over udp the

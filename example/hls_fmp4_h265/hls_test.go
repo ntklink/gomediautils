@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // ffmpeg plays the generated presentation the way a player would: fetch the

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // An mp4 built in memory has to be the same file as one built on disk, which

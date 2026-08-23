@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // ffmpeg writes a real flv, gomedia turns it into an mp4, and ffmpeg has to

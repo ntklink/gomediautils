@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // TestPlayFromRemoteServer has ffmpeg publish into a third party server and

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-rtsp/sdp"
+	"github.com/ntklink/gomediautils/go-rtsp/sdp"
 )
 
 type RtspServer struct {

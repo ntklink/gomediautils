@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
-	"github.com/yapingcat/gomedia/go-rtmp"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
+	"github.com/ntklink/gomediautils/go-rtmp"
 )
 
 var rtmpUrl = flag.String("url", "rtmp://127.0.0.1/live/test", "play rtmp url")

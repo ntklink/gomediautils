@@ -1,89 +1,108 @@
-### USAGE
+# Codec Usage
 
-1. 如何解析sps/pps/vps
-    以解析sps为例
-    ```golang
+Import the codec package as follows:
 
-    //sps原始数据,不带start code(0x00000001)
-    var rawsps []byte = []byte{0x67,....}
-    
-    //step1 创建BitStream
-    bs := codec.NewBitStream(rawsps)
+```go
+import codec "github.com/ntklink/gomediautils/go-codec"
+```
 
-    //step2 解析sps
-    sps := &SPS{}
-    sps.Decode(bs)
+## Parse SPS, PPS, or VPS Data
 
-    ```
-2. 获取视频宽高
-    以h264为例子
-    ```golang
-    //sps原始数据,以startcode开头(0x00000001)
-    var rawsps []byte = []byte{0x00,0x00,0x00,0x01,0x67,.....}
-    w, h := codec.GetH264Resolution(rawsps)
-    ```
+The following H.264 example parses raw SPS data without an Annex B start code (`0x00000001`):
 
-3. 生成Extradata
-    以h264为例子
-    ```golang
+```go
+rawSPS := []byte{0x67 /* remaining SPS bytes */}
 
-    //多个sps原始数据,以startcode开头(0x00000001)
-    var spss [][]byte = [][]byte{
-        []byte{0x00,0x00,0x00,0x01,0x67,...},
-        []byte{0x00,0x00,0x00,0x01,0x67,...},
-        ....
-    }
+bs := codec.NewBitStream(rawSPS)
+sps := &codec.SPS{}
+sps.Decode(bs)
 
-     //多个pps原始数据,以startcode开头(0x00000001)
-    var ppss [][]byte = [][]byte{
-        []byte{0x00,0x00,0x00,0x01,0x68,...},
-        []byte{0x00,0x00,0x00,0x01,0x68,...},
-        ....
-    }
-    extranData := codec.CreateH264AVCCExtradata(spss,ppss)
-    ```
+if err := bs.Err(); err != nil {
+	// Handle malformed or truncated SPS data.
+}
+```
 
-4. Extradata转为Annex-B格式的sps,pps
-    以h264为例子
-    ```golang
+## Get the Video Resolution
 
-    //一般从flv/mp4格式中获取 extraData
-    //解析出来多个sps,pps, 且sps pps 都以startcode开头
-    spss,ppss := codec.CovertExtradata(extraData)
-    ```
+Pass an H.264 SPS NAL unit prefixed with an Annex B start code:
 
-5. 生成H265 extrandata
-    
-    ```golang
-    // H265的extra data 生成过程稍微复杂一些
-    //创建一个 HEVCRecordConfiguration 对象
+```go
+rawSPS := []byte{0x00, 0x00, 0x00, 0x01, 0x67 /* remaining SPS bytes */}
 
-    hvcc := codec.NewHEVCRecordConfiguration()
-    
-    //对每一个 sps/pps/vps,调用相应的UpdateSPS,UpdatePPS,UpdateVPS接口
-    hvcc.UpdateSPS(sps)
-    hvcc.UpdatePPS(pps)
-    hvcc.UpdateVPS(vps)
+width, height, err := codec.GetH264Resolution(rawSPS)
+if err != nil {
+	// Handle malformed or truncated SPS data.
+}
+```
 
-    //调用Encode接口生成
-    extran := hvcc.Encode()
-    ```
-6. 获取对应的sps id/vps id/pps id
+## Create H.264 Extradata
 
-    ```golang
-    //以h264为例子，有四个接口
-    //sps 以startcode 开头
-    codec.GetSPSIdWithStartCode(sps)
+`CreateH264AVCCExtradata` creates an AVC decoder configuration record from one or more SPS and PPS NAL units. Each NAL unit may include an Annex B start code.
 
-    //sps2 不以startcode 开头
-    codec.GetSPSId(sps2)
+```go
+spss := [][]byte{
+	{0x00, 0x00, 0x00, 0x01, 0x67 /* remaining SPS bytes */},
+	{0x00, 0x00, 0x00, 0x01, 0x67 /* remaining SPS bytes */},
+}
 
-    //pps 以startcode 开头
-    codec.GetPPSIdWithStartCode(pps)
+ppss := [][]byte{
+	{0x00, 0x00, 0x00, 0x01, 0x68 /* remaining PPS bytes */},
+	{0x00, 0x00, 0x00, 0x01, 0x68 /* remaining PPS bytes */},
+}
 
-    //pps2 不以startcode 开头
-    codec.GetPPSId(pps2)
+extradata, err := codec.CreateH264AVCCExtradata(spss, ppss)
+if err != nil {
+	// Handle invalid parameter-set data.
+}
+```
 
+## Convert H.264 Extradata to Annex B
 
+Extradata read from formats such as FLV or MP4 can be split into SPS and PPS NAL units. Every returned NAL unit includes an Annex B start code.
 
-    ```
+```go
+spss, ppss, err := codec.CovertExtradata(extradata)
+if err != nil {
+	// Handle malformed extradata.
+}
+```
+
+## Create H.265 Extradata
+
+Build an HEVC decoder configuration record by adding each VPS, SPS, and PPS to an `HEVCRecordConfiguration`:
+
+```go
+func createH265Extradata(vps, sps, pps []byte) ([]byte, error) {
+	hvcc := codec.NewHEVCRecordConfiguration()
+
+	if err := hvcc.UpdateVPS(vps); err != nil {
+		return nil, err
+	}
+	if err := hvcc.UpdateSPS(sps); err != nil {
+		return nil, err
+	}
+	if err := hvcc.UpdatePPS(pps); err != nil {
+		return nil, err
+	}
+
+	return hvcc.Encode()
+}
+```
+
+## Get Parameter-Set IDs
+
+For H.264, use the method that matches whether the NAL unit includes an Annex B start code:
+
+```go
+// SPS with an Annex B start code.
+spsID := codec.GetSPSIdWithStartCode(sps)
+
+// SPS without an Annex B start code.
+spsID = codec.GetSPSId(spsWithoutStartCode)
+
+// PPS with an Annex B start code.
+ppsID := codec.GetPPSIdWithStartCode(pps)
+
+// PPS without an Annex B start code.
+ppsID = codec.GetPPSId(ppsWithoutStartCode)
+```

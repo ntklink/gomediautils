@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
 )
 
 // the server tests block forever waiting for a real rtmp client, run them only when

@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
-	"github.com/yapingcat/gomedia/go-mpeg2"
-	"github.com/yapingcat/gomedia/go-rtsp"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
+	"github.com/ntklink/gomediautils/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-rtsp"
 )
 
 // maxRtpPayload keeps an rtp packet inside a typical 1500 byte mtu once the

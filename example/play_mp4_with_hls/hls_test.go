@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // The segments are built on demand, so the test drives the server the way a

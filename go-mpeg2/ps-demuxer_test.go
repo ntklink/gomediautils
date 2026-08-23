@@ -3,7 +3,7 @@ package mpeg2
 import (
 	"testing"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 var ps1 []byte = []byte{0x00, 0x00, 0x01, 0xBA}

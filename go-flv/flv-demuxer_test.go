@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 // High profile SPS (1280x720) and two PPS with different ids, Annex-B form.

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
-	"github.com/yapingcat/gomedia/go-rtmp"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
+	"github.com/ntklink/gomediautils/go-rtmp"
 )
 
 // TestFFmpegPublishToRtmpServer pushes a real clip into the rtmp server with

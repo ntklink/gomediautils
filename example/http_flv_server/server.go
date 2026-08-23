@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
 )
 
 var addr = flag.String("addr", ":19999", "listen address")

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // ffmpeg is a real HLS client: pointing it at the generated playlist makes it

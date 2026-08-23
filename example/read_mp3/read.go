@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 // MP3Frame is one frame of an mp3 elementary stream, described by its header.

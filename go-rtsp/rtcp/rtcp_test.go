@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/yapingcat/gomedia/go-rtsp/rtp"
+	"github.com/ntklink/gomediautils/go-rtsp/rtp"
 )
 
 func TestCommDecodeShort(t *testing.T) {

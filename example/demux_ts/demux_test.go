@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // Demuxing has to give back exactly what the muxer put in. ffmpeg encodes a

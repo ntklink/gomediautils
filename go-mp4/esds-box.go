@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 // abstract aligned(8) expandable(228-1) class BaseDescriptor : bit(8) tag=0 {

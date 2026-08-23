@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-mp4"
-	"github.com/yapingcat/gomedia/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-mp4"
+	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
 // segment is one entry of the playlist: a half open interval [start, end) of

@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 // flvSeedFile builds a tiny but valid flv file (header + one avc sequence

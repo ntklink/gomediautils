@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 // pump moves queued bytes between client and server until nothing is in flight

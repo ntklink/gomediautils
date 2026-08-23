@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // ffmpeg pulls an http-flv stream out of the server and has to end up with

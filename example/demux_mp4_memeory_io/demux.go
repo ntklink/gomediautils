@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // DemuxMP4FromMemory demuxes an mp4 held entirely in memory.

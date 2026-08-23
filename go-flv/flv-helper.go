@@ -1,7 +1,7 @@
 package flv
 
 import (
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 func PutUint24(b []byte, v uint32) {

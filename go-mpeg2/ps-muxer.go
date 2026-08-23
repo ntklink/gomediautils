@@ -1,6 +1,6 @@
 package mpeg2
 
-import "github.com/yapingcat/gomedia/go-codec"
+import "github.com/ntklink/gomediautils/go-codec"
 
 type PSMuxer struct {
 	system *System_header

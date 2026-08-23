@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // The input here is what a real hls or dash player downloads: an init

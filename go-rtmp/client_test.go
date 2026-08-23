@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
 )
 
 // netTestAddr returns the rtmp server used by the network tests, they are skipped unless

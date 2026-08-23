@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
 )
 
 // RemuxFLV reads an flv file and writes an equivalent one, going all the way

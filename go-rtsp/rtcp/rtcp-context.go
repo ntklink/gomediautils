@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-rtsp/rtp"
+	"github.com/ntklink/gomediautils/go-rtsp/rtp"
 )
 
 //https://www.rfc-editor.org/rfc/rfc3550#section-17

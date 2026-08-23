@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
 // rtpFixedHeaderLen is the size of an rtp header with no csrc list and no

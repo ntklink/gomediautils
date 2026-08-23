@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // DemuxFragments reads a fragmented mp4 that arrives the way a player gets

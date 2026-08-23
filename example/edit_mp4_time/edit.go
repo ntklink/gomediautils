@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // mp4Epoch is the zero of every date in an mp4 file: midnight 1904-01-01,

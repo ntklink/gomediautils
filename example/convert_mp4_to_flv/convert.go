@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-flv"
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/go-flv"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // ConvertMP4ToFLV remuxes an mp4 file into a flv file.

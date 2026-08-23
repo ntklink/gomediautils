@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // TestFFmpegPushAndPullRTSP drives the rtsp server with ffmpeg on both ends:

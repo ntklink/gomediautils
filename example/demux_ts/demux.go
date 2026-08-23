@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/yapingcat/gomedia/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
 // DemuxTS pulls the elementary streams out of an mpeg-ts file and writes each

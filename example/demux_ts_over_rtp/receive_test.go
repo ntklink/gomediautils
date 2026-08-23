@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // ffmpeg's rtp_mpegts muxer is the sender, so the packets on the wire are

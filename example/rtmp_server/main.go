@@ -7,8 +7,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-rtmp"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-rtmp"
 )
 
 var port = flag.String("port", "1935", "rtmp server listen port")

@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // mp4 is the demux the b-frame cases matter for: samples are stored in decode

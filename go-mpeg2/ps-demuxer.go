@@ -1,7 +1,7 @@
 package mpeg2
 
 import (
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 type psstream struct {

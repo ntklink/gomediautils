@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 // The client is pointed at an ffmpeg-fed http-flv stream, so what it parses

@@ -5,7 +5,7 @@ A Go library for muxing and demuxing MPEG-TS, MPEG-PS, FLV, MP4, and RTMP media 
 ## Installation
 
 ```bash
-go get github.com/yapingcat/gomedia
+go get github.com/ntklink/gomediautils
 ```
 
 ## Codec Utilities

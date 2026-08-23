@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
 // MuxMP3ToTS wraps an mp3 elementary stream in an mpeg-ts file.

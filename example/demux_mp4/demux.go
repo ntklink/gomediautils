@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/yapingcat/gomedia/go-mp4"
+	"github.com/ntklink/gomediautils/go-mp4"
 )
 
 // DemuxMP4 pulls the elementary streams out of an mp4 file and writes each

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 type AVPacket struct {

@@ -11,9 +11,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-mp4"
-	"github.com/yapingcat/gomedia/go-rtmp"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-mp4"
+	"github.com/ntklink/gomediautils/go-rtmp"
 )
 
 // PublishMP4 pushes the tracks of an mp4 file to an rtmp server.

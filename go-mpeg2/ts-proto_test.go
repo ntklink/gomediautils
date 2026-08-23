@@ -3,7 +3,7 @@ package mpeg2
 import (
 	"testing"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 func TestAdaptationField_DecodeShort(t *testing.T) {

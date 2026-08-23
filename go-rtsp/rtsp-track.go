@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-rtsp/rtcp"
-	"github.com/yapingcat/gomedia/go-rtsp/rtp"
-	"github.com/yapingcat/gomedia/go-rtsp/sdp"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-rtsp/rtcp"
+	"github.com/ntklink/gomediautils/go-rtsp/rtp"
+	"github.com/ntklink/gomediautils/go-rtsp/sdp"
 )
 
 func init() {

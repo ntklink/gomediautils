@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 // mp4 is the awkward source to publish from: samples come out of the

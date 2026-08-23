@@ -6,9 +6,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-mp4"
-	"github.com/yapingcat/gomedia/go-ogg"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-mp4"
+	"github.com/ntklink/gomediautils/go-ogg"
 )
 
 // ConvertOggToMP4 pulls the opus stream out of an ogg file and writes it into

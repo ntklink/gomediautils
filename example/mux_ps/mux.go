@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
 // MuxTSToPS reads an mpeg-ts file and writes the same streams as an mpeg

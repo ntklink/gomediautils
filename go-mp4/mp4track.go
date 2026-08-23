@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 type sampleCache struct {

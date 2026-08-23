@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-mp4"
-	"github.com/yapingcat/gomedia/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-mp4"
+	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
 // ConvertTSToMP4 remuxes an mpeg-ts file into an mp4 file. Tracks are added

@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/yapingcat/gomedia/go-mp4"
-	"github.com/yapingcat/gomedia/go-mpeg2"
+	"github.com/ntklink/gomediautils/go-mp4"
+	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
 // MuxTSToMP4InMemory reads an mpeg-ts file and returns the mp4 it produces,

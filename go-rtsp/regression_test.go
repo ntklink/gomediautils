@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yapingcat/gomedia/go-rtsp/sdp"
+	"github.com/ntklink/gomediautils/go-rtsp/sdp"
 )
 
 // A session level "a=control" is optional (rfc2326 C.1.1): without one the

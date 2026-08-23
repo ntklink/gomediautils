@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yapingcat/gomedia/go-codec"
-	"github.com/yapingcat/gomedia/go-flv"
-	"github.com/yapingcat/gomedia/go-rtsp"
-	"github.com/yapingcat/gomedia/go-rtsp/sdp"
+	"github.com/ntklink/gomediautils/go-codec"
+	"github.com/ntklink/gomediautils/go-flv"
+	"github.com/ntklink/gomediautils/go-rtsp"
+	"github.com/ntklink/gomediautils/go-rtsp/sdp"
 )
 
 // RtspRecordSession publishes a flv file to an rtsp server with ANNOUNCE and

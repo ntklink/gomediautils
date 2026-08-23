@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/yapingcat/gomedia/example/internal/mediatest"
+	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
 // ffmpeg writes the flv, gomedia takes it apart, and the elementary streams

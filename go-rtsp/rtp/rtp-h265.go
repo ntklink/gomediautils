@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/yapingcat/gomedia/go-codec"
+	"github.com/ntklink/gomediautils/go-codec"
 )
 
 //h265 nalu head
