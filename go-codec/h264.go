@@ -75,6 +75,14 @@ type SPS struct {
 	VuiParameters                        H264VuiParameters
 }
 
+func hasChromaFormatIdc(profileIdc uint8) bool {
+	switch profileIdc {
+	case 100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135:
+		return true
+	}
+	return false
+}
+
 func (sps *SPS) Decode(bs *BitStream) {
 	sps.Profile_idc = bs.Uint8(8)
 	sps.Constraint_set0_flag = bs.GetBit()
@@ -86,11 +94,7 @@ func (sps *SPS) Decode(bs *BitStream) {
 	sps.Reserved_zero_2bits = bs.Uint8(2)
 	sps.Level_idc = bs.Uint8(8)
 	sps.Seq_parameter_set_id = bs.ReadUE()
-	if sps.Profile_idc == 100 || sps.Profile_idc == 110 ||
-		sps.Profile_idc == 122 || sps.Profile_idc == 244 || sps.Profile_idc == 44 ||
-		sps.Profile_idc == 83 || sps.Profile_idc == 86 || sps.Profile_idc == 118 ||
-		sps.Profile_idc == 128 || sps.Profile_idc == 138 || sps.Profile_idc == 139 ||
-		sps.Profile_idc == 134 || sps.Profile_idc == 135 {
+	if hasChromaFormatIdc(sps.Profile_idc) {
 		sps.Chroma_format_idc = bs.ReadUE()
 		if sps.Chroma_format_idc == 3 {
 			sps.Separate_colour_plane_flag = bs.Uint8(1) //separate_colour_plane_flag
@@ -100,11 +104,19 @@ func (sps *SPS) Decode(bs *BitStream) {
 		bs.SkipBits(1)                            //qpprime_y_zero_transform_bypass_flag
 		seq_scaling_matrix_present_flag := bs.GetBit()
 		if seq_scaling_matrix_present_flag == 1 {
-			//seq_scaling_list_present_flag[i]
+			listCount := 8
 			if sps.Chroma_format_idc == 3 {
-				bs.SkipBits(12)
-			} else {
-				bs.SkipBits(8)
+				listCount = 12
+			}
+			for i := 0; i < listCount; i++ {
+				//seq_scaling_list_present_flag[i]
+				if bs.GetBit() == 1 {
+					if i < 6 {
+						skipScalingList(bs, 16)
+					} else {
+						skipScalingList(bs, 64)
+					}
+				}
 			}
 		}
 	}
@@ -117,6 +129,11 @@ func (sps *SPS) Decode(bs *BitStream) {
 		sps.Offset_for_non_ref_pic = bs.ReadSE()         // offset_for_non_ref_pic
 		sps.Offset_for_top_to_bottom_field = bs.ReadSE() // offset_for_top_to_bottom_field
 		num_ref_frames_in_pic_order_cnt_cycle := bs.ReadUE()
+		if num_ref_frames_in_pic_order_cnt_cycle > 255 {
+			bs.Fail(errors.New("h264: num_ref_frames_in_pic_order_cnt_cycle > 255"))
+			return
+		}
+		sps.Offset_for_ref_frame = make([]int64, num_ref_frames_in_pic_order_cnt_cycle)
 		for i := 0; i < int(num_ref_frames_in_pic_order_cnt_cycle); i++ {
 			sps.Offset_for_ref_frame[i] = bs.ReadSE() // offset_for_ref_frame
 		}
@@ -141,6 +158,21 @@ func (sps *SPS) Decode(bs *BitStream) {
 
 	if sps.Vui_parameters_present_flag == 1 {
 		sps.VuiParameters.Decode(bs)
+	}
+}
+
+// scaling_list( scalingList, sizeOfScalingList, useDefaultScalingMatrixFlag ) 7.3.2.1.1.1
+func skipScalingList(bs *BitStream, size int) {
+	lastScale := int64(8)
+	nextScale := int64(8)
+	for j := 0; j < size; j++ {
+		if nextScale != 0 {
+			deltaScale := bs.ReadSE()
+			nextScale = (lastScale + deltaScale + 256) % 256
+		}
+		if nextScale != 0 {
+			lastScale = nextScale
+		}
 	}
 }
 
@@ -171,8 +203,12 @@ type UserDataUnregistered struct {
 }
 
 func (udu *UserDataUnregistered) Read(size uint16, bs *BitStream) {
+	if size < 16 {
+		udu.UUID = bs.GetBytes(int(size))
+		return
+	}
 	udu.UUID = bs.GetBytes(16)
-	udu.UserData = bs.GetBytes(int(size - 16))
+	udu.UserData = bs.GetBytes(int(size) - 16)
 }
 
 func (udu *UserDataUnregistered) Write(bsw *BitStreamWriter) {
@@ -218,45 +254,93 @@ func (sei *SEI) Encode(bsw *BitStreamWriter) []byte {
 	return bsw.Bits()
 }
 
+// GetSPSIdWithStartCode returns the seq_parameter_set_id of an SPS that may be
+// prefixed with a start code, or 0 when the nalu is truncated.
 func GetSPSIdWithStartCode(sps []byte) uint64 {
-	start, sc := FindStartCode(sps, 0)
-	return GetSPSId(sps[start+int(sc):])
+	off := naluOffset(sps)
+	if off < 0 {
+		return 0
+	}
+	return GetSPSId(sps[off:])
 }
 
 func GetSPSId(sps []byte) uint64 {
-	sps = sps[1:]
-	bs := NewBitStream(sps)
+	if len(sps) < 1 {
+		return 0
+	}
+	bs := NewBitStream(sps[1:])
 	bs.SkipBits(24)
 	return bs.ReadUE()
 }
 
+// GetPPSIdWithStartCode returns the pic_parameter_set_id of a PPS that may be
+// prefixed with a start code, or 0 when the nalu is truncated.
 func GetPPSIdWithStartCode(pps []byte) uint64 {
-	start, sc := FindStartCode(pps, 0)
-	return GetPPSId(pps[start+int(sc):])
+	off := naluOffset(pps)
+	if off < 0 {
+		return 0
+	}
+	return GetPPSId(pps[off:])
 }
 
 func GetPPSId(pps []byte) uint64 {
-	pps = pps[1:]
-	bs := NewBitStream(pps)
+	if len(pps) < 1 {
+		return 0
+	}
+	bs := NewBitStream(pps[1:])
 	return bs.ReadUE()
 }
 
 // https://stackoverflow.com/questions/12018535/get-the-width-height-of-the-video-from-h-264-nalu
 // int Width = ((pic_width_in_mbs_minus1 +1)*16) - frame_crop_right_offset *2 - frame_crop_left_offset *2;
 // int Height = ((2 - frame_mbs_only_flag)* (pic_height_in_map_units_minus1 +1) * 16) - (frame_crop_bottom_offset* 2) - (frame_crop_top_offset* 2);
-func GetH264Resolution(sps []byte) (width uint32, height uint32) {
-	start, sc := FindStartCode(sps, 0)
-	sodb := CovertRbspToSodb(sps[start+int(sc)+1:])
+// GetH264Resolution returns the coded resolution of an SPS. It reports an
+// error when the SPS is truncated or malformed.
+func GetH264Resolution(sps []byte) (width uint32, height uint32, err error) {
+	off := naluOffset(sps)
+	if off < 0 || off+1 >= len(sps) {
+		return 0, 0, errors.New("h264: empty sps nalu")
+	}
+	sodb := CovertRbspToSodb(sps[off+1:])
 	bs := NewBitStream(sodb)
 	var s SPS
 	s.Decode(bs)
+	if bs.Err() != nil {
+		return 0, 0, bs.Err()
+	}
+
+	// 7-21 / 7-22: CropUnitX / CropUnitY
+	chromaArrayType := s.Chroma_format_idc
+	if s.Separate_colour_plane_flag == 1 {
+		chromaArrayType = 0
+	}
+	// profiles without chroma_format_idc in the SPS default to 4:2:0
+	if !hasChromaFormatIdc(s.Profile_idc) {
+		chromaArrayType = 1
+	}
+	cropUnitX := uint32(1)
+	cropUnitY := uint32(2 - uint32(s.Frame_mbs_only_flag))
+	switch chromaArrayType {
+	case 1:
+		cropUnitX = 2
+		cropUnitY = 2 * (2 - uint32(s.Frame_mbs_only_flag))
+	case 2:
+		cropUnitX = 2
+		cropUnitY = 1 * (2 - uint32(s.Frame_mbs_only_flag))
+	}
 
 	widthInSample := (uint32(s.Pic_width_in_mbs_minus1) + 1) * 16
-	widthCrop := uint32(s.Frame_crop_left_offset)*2 + uint32(s.Frame_crop_right_offset)*2
+	widthCrop := (uint32(s.Frame_crop_left_offset) + uint32(s.Frame_crop_right_offset)) * cropUnitX
+	if s.Frame_cropping_flag == 0 || widthCrop >= widthInSample {
+		widthCrop = 0
+	}
 	width = widthInSample - widthCrop
 
 	heightInSample := ((2 - uint32(s.Frame_mbs_only_flag)) * (uint32(s.Pic_height_in_map_units_minus1) + 1) * 16)
-	heightCrop := uint32(s.Frame_crop_bottom_offset)*2 - uint32(s.Frame_crop_top_offset)*2
+	heightCrop := (uint32(s.Frame_crop_top_offset) + uint32(s.Frame_crop_bottom_offset)) * cropUnitY
+	if s.Frame_cropping_flag == 0 || heightCrop >= heightInSample {
+		heightCrop = 0
+	}
 	height = heightInSample - heightCrop
 
 	return
@@ -371,43 +455,64 @@ func CreateH264AVCCExtradata(spss [][]byte, ppss [][]byte) ([]byte, error) {
 	return extradata, nil
 }
 
-func CovertExtradata(extraData []byte) ([][]byte, [][]byte) {
-	spsnum := extraData[5] & 0x1F
-	spss := make([][]byte, spsnum)
-	offset := 6
-	for i := 0; i < int(spsnum); i++ {
-		spssize := binary.BigEndian.Uint16(extraData[offset:])
-		sps := make([]byte, spssize+4)
-		copy(sps, []byte{0x00, 0x00, 0x00, 0x01})
-		copy(sps[4:], extraData[offset+2:offset+2+int(spssize)])
-		offset += 2 + int(spssize)
-		spss[i] = sps
+// CovertExtradata splits an AVCDecoderConfigurationRecord into its start code
+// prefixed SPS and PPS nalus. It reports an error for a truncated or
+// inconsistent record instead of reading out of bounds.
+func CovertExtradata(extraData []byte) ([][]byte, [][]byte, error) {
+	if len(extraData) < 6 {
+		return nil, nil, errors.New("h264: avcC record shorter than 6 bytes")
 	}
-	ppsnum := extraData[offset]
-	ppss := make([][]byte, ppsnum)
+	// readNalus reads count length prefixed nalus starting at offset and
+	// returns them with a 4 byte start code prepended.
+	readNalus := func(offset, count int) ([][]byte, int, error) {
+		nalus := make([][]byte, 0, count)
+		for i := 0; i < count; i++ {
+			if offset+2 > len(extraData) {
+				return nil, 0, errors.New("h264: truncated avcC record")
+			}
+			size := int(binary.BigEndian.Uint16(extraData[offset:]))
+			if offset+2+size > len(extraData) {
+				return nil, 0, errors.New("h264: avcC nalu length beyond the record")
+			}
+			nalu := make([]byte, size+4)
+			copy(nalu, []byte{0x00, 0x00, 0x00, 0x01})
+			copy(nalu[4:], extraData[offset+2:offset+2+size])
+			offset += 2 + size
+			nalus = append(nalus, nalu)
+		}
+		return nalus, offset, nil
+	}
+
+	spss, offset, err := readNalus(6, int(extraData[5]&0x1F))
+	if err != nil {
+		return nil, nil, err
+	}
+	if offset >= len(extraData) {
+		return nil, nil, errors.New("h264: avcC record has no pps count")
+	}
+	ppsnum := int(extraData[offset])
 	offset++
-	for i := 0; i < int(ppsnum); i++ {
-		ppssize := binary.BigEndian.Uint16(extraData[offset:])
-		pps := make([]byte, ppssize+4)
-		copy(pps, []byte{0x00, 0x00, 0x00, 0x01})
-		copy(pps[4:], extraData[offset+2:offset+2+int(ppssize)])
-		offset += 2 + int(ppssize)
-		ppss[i] = pps
+	ppss, _, err := readNalus(offset, ppsnum)
+	if err != nil {
+		return nil, nil, err
 	}
-	return spss, ppss
+	return spss, ppss, nil
 }
 
+// ConvertAnnexBToAVCC returns a new slice; the caller's buffer is never modified.
 func ConvertAnnexBToAVCC(annexb []byte) []byte {
 	start, sc := FindStartCode(annexb, 0)
-	if sc == START_CODE_4 {
-		binary.BigEndian.PutUint32(annexb[start:], uint32(len(annexb)-4))
-		return annexb
-	} else {
-		avcc := make([]byte, 1+len(annexb))
-		binary.BigEndian.PutUint32(avcc, uint32(len(annexb)-3))
-		copy(avcc[4:], annexb[start+3:])
+	if start < 0 {
+		avcc := make([]byte, 4+len(annexb))
+		binary.BigEndian.PutUint32(avcc, uint32(len(annexb)))
+		copy(avcc[4:], annexb)
 		return avcc
 	}
+	payload := annexb[start+int(sc):]
+	avcc := make([]byte, 4+len(payload))
+	binary.BigEndian.PutUint32(avcc, uint32(len(payload)))
+	copy(avcc[4:], payload)
+	return avcc
 }
 
 func CovertAVCCToAnnexB(avcc []byte) {
@@ -486,7 +591,7 @@ func (h264Vui *H264VuiParameters) Decode(bs *BitStream) {
 
 		if h264Vui.AspectRatioIdc == ExtendedSar {
 			h264Vui.SarWidth = bs.Uint16(16)
-			h264Vui.SarWidth = bs.Uint16(16)
+			h264Vui.SarHeight = bs.Uint16(16)
 		}
 	}
 
@@ -562,6 +667,10 @@ func (h264Hrd *H264HrdParameters) Decode(bs *BitStream) {
 	h264Hrd.CpbCntMinus1 = bs.ReadUE()
 	h264Hrd.BitRateScale = bs.Uint8(4)
 	h264Hrd.CpbSizeScale = bs.Uint8(4)
+	if h264Hrd.CpbCntMinus1 > 31 {
+		bs.Fail(errors.New("h264: cpb_cnt_minus1 > 31"))
+		return
+	}
 
 	h264Hrd.H264BitRateCpbSizeCbrFlag = make([]H264BitRateCpbSizeCbrFlag, h264Hrd.CpbCntMinus1+1)
 

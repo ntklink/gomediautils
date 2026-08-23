@@ -1,9 +1,9 @@
 package codec
 
 import (
-    "bytes"
-    "errors"
-    "fmt"
+	"bytes"
+	"errors"
+	"fmt"
 )
 
 //mp3 file format
@@ -140,185 +140,218 @@ import (
 //                                                         11 - CCIT J.17
 //  ------------------------------------------------------------------------------------------------
 
-//ffmpeg mpegaudiotabs.h ff_mpa_bitrate_tab
+// ffmpeg mpegaudiotabs.h ff_mpa_bitrate_tab
 var BitRateTable [2][3][16]int = [2][3][16]int{
-    {
-        {0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, -1},
-        {0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 380, -1},
-        {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, -1},
-    },
-    {
-        {0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, -1},
-        {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, -1},
-        {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, -1},
-    },
+	{
+		{0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, -1},
+		{0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 380, -1},
+		{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, -1},
+	},
+	{
+		{0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, -1},
+		{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, -1},
+		{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, -1},
+	},
 }
 
 var SampleRateTable [3][4]int = [3][4]int{
-    {44100, 48000, 32000, 0},
-    {22050, 24000, 16000, 0},
-    {11025, 12000, 8000, 0},
+	{44100, 48000, 32000, 0},
+	{22050, 24000, 16000, 0},
+	{11025, 12000, 8000, 0},
 }
 
 const (
-    VERSION_RESERVED = 0
-    VERSION_MPEG_1   = 1
-    VERSION_MPEG_2   = 2
-    VERSION_MPEG_2_5 = 3
+	VERSION_RESERVED = 0
+	VERSION_MPEG_1   = 1
+	VERSION_MPEG_2   = 2
+	VERSION_MPEG_2_5 = 3
 )
 
 const (
-    LAYER_RESERVED = 0
-    LAYER_1        = 1
-    LAYER_2        = 2
-    LAYER_3        = 3
+	LAYER_RESERVED = 0
+	LAYER_1        = 1
+	LAYER_2        = 2
+	LAYER_3        = 3
 )
 
 type ID3V2 struct {
-    Ver      uint8
-    Revision uint8
-    Flag     uint8
-    Size     uint32
+	Ver      uint8
+	Revision uint8
+	Flag     uint8
+	Size     uint32
 }
 
 type MP3FrameHead struct {
-    Version         uint8
-    Layer           uint8
-    Protecttion     uint8
-    BitrateIndex    uint8
-    SampleRateIndex uint8
-    Padding         uint8
-    Private         uint8
-    Mode            uint8
-    ModeExtension   uint8
-    Copyright       uint8
-    Original        uint8
-    Emphasis        uint8
-    SampleSize      int
-    FrameSize       int
+	Version         uint8
+	Layer           uint8
+	Protecttion     uint8
+	BitrateIndex    uint8
+	SampleRateIndex uint8
+	Padding         uint8
+	Private         uint8
+	Mode            uint8
+	ModeExtension   uint8
+	Copyright       uint8
+	Original        uint8
+	Emphasis        uint8
+	SampleSize      int
+	FrameSize       int
 }
 
 func DecodeMp3Head(data []byte) (*MP3FrameHead, error) {
-    if len(data) == 0 {
-        return nil, errors.New("empty mp3 frame")
-    }
-    bs := NewBitStream(data)
-    syncWord := bs.GetBits(11)
-    if syncWord != 0x7FF {
-        return nil, errors.New("mp3 frame must start with 0xFFE")
-    }
+	if len(data) == 0 {
+		return nil, errors.New("empty mp3 frame")
+	}
+	bs := NewBitStream(data)
+	syncWord := bs.GetBits(11)
+	if syncWord != 0x7FF {
+		return nil, errors.New("mp3 frame must start with 0xFFE")
+	}
 
-    head := &MP3FrameHead{}
-    head.Version = uint8(bs.GetBits(2))
-    switch head.Version {
-    case 0x00:
-        head.Version = VERSION_MPEG_2_5
-    case 0x01:
-        head.Version = VERSION_RESERVED
-    case 0x02:
-        head.Version = VERSION_MPEG_2
-    case 0x03:
-        head.Version = VERSION_MPEG_1
-    }
+	head := &MP3FrameHead{}
+	head.Version = uint8(bs.GetBits(2))
+	switch head.Version {
+	case 0x00:
+		head.Version = VERSION_MPEG_2_5
+	case 0x01:
+		head.Version = VERSION_RESERVED
+	case 0x02:
+		head.Version = VERSION_MPEG_2
+	case 0x03:
+		head.Version = VERSION_MPEG_1
+	}
 
-    head.Layer = uint8(bs.GetBits(2))
+	head.Layer = uint8(bs.GetBits(2))
 
-    switch head.Layer {
-    case 0x00:
-        head.Layer = LAYER_RESERVED
-    case 0x01:
-        head.Layer = LAYER_3
-    case 0x02:
-        head.Layer = LAYER_2
-    case 0x03:
-        head.Layer = LAYER_1
-    }
+	switch head.Layer {
+	case 0x00:
+		head.Layer = LAYER_RESERVED
+	case 0x01:
+		head.Layer = LAYER_3
+	case 0x02:
+		head.Layer = LAYER_2
+	case 0x03:
+		head.Layer = LAYER_1
+	}
 
-    head.Protecttion = bs.GetBit()
-    head.BitrateIndex = uint8(bs.GetBits(4))
-    head.SampleRateIndex = uint8(bs.GetBits(2))
-    head.Padding = bs.GetBit()
-    head.Private = bs.GetBit()
-    head.Mode = uint8(bs.GetBits(2))
-    head.ModeExtension = uint8(bs.GetBits(2))
-    head.Copyright = bs.GetBit()
-    head.Original = bs.GetBit()
-    head.Emphasis = uint8(bs.GetBits(2))
+	head.Protecttion = bs.GetBit()
+	head.BitrateIndex = uint8(bs.GetBits(4))
+	head.SampleRateIndex = uint8(bs.GetBits(2))
+	head.Padding = bs.GetBit()
+	head.Private = bs.GetBit()
+	head.Mode = uint8(bs.GetBits(2))
+	head.ModeExtension = uint8(bs.GetBits(2))
+	head.Copyright = bs.GetBit()
+	head.Original = bs.GetBit()
+	head.Emphasis = uint8(bs.GetBits(2))
 
-    if head.Layer == LAYER_1 {
-        head.SampleSize = 384
-    } else if head.Layer == LAYER_2 {
-        head.SampleSize = 1152
-    } else {
-        if head.Version == VERSION_MPEG_1 {
-            head.SampleSize = 1152
-        } else {
-            head.SampleSize = 576
-        }
-    }
+	if head.Version == VERSION_RESERVED {
+		return nil, errors.New("mp3 reserved version")
+	}
+	if head.Layer == LAYER_RESERVED {
+		return nil, errors.New("mp3 reserved layer")
+	}
+	if head.SampleRateIndex == 3 {
+		return nil, errors.New("mp3 reserved sample rate index")
+	}
+	if head.BitrateIndex == 15 {
+		return nil, errors.New("mp3 bad bitrate index")
+	}
+	if head.BitrateIndex == 0 {
+		return nil, errors.New("mp3 free bitrate is not supported")
+	}
 
-    br := head.GetBitRate()
-    head.FrameSize = head.SampleSize / 8 * br / head.GetSampleRate()
-    //layer 1 has 4 bytes padding,other has one byte
-    if head.Layer == LAYER_1 {
-        head.FrameSize += int(head.Padding) * 4
-    } else {
-        head.FrameSize += int(head.Padding)
-    }
-    return head, nil
+	if head.Layer == LAYER_1 {
+		head.SampleSize = 384
+	} else if head.Layer == LAYER_2 {
+		head.SampleSize = 1152
+	} else {
+		if head.Version == VERSION_MPEG_1 {
+			head.SampleSize = 1152
+		} else {
+			head.SampleSize = 576
+		}
+	}
+
+	br := head.GetBitRate()
+	sr := head.GetSampleRate()
+	if br <= 0 || sr <= 0 {
+		return nil, errors.New("mp3 invalid bitrate or samplerate")
+	}
+	head.FrameSize = head.SampleSize / 8 * br / sr
+	//layer 1 has 4 bytes padding,other has one byte
+	if head.Layer == LAYER_1 {
+		head.FrameSize += int(head.Padding) * 4
+	} else {
+		head.FrameSize += int(head.Padding)
+	}
+	if head.FrameSize < 4 {
+		return nil, errors.New("mp3 invalid frame size")
+	}
+	return head, nil
 }
 
 func (mp3 *MP3FrameHead) GetChannelCount() int {
-    if mp3.Mode == 0x11 {
-        return 1
-    } else {
-        return 2
-    }
+	if mp3.Mode == 0x03 {
+		return 1
+	} else {
+		return 2
+	}
 }
 
 func (mp3 *MP3FrameHead) GetBitRate() int {
-    var i int = 0
-    if mp3.Version == VERSION_MPEG_2 || mp3.Version == VERSION_MPEG_2_5 {
-        i = 1
-    }
-    return BitRateTable[i][mp3.Layer-1][mp3.BitrateIndex] * 1000
+	var i int = 0
+	if mp3.Version == VERSION_MPEG_2 || mp3.Version == VERSION_MPEG_2_5 {
+		i = 1
+	}
+	if mp3.Layer < LAYER_1 || mp3.Layer > LAYER_3 || mp3.BitrateIndex > 15 {
+		return 0
+	}
+	return BitRateTable[i][mp3.Layer-1][mp3.BitrateIndex] * 1000
 }
 
 func (mp3 *MP3FrameHead) GetSampleRate() int {
-    if mp3.Version == LAYER_RESERVED {
-        return 0
-    }
-    return SampleRateTable[mp3.Version-1][mp3.SampleRateIndex]
+	if mp3.Version == VERSION_RESERVED || mp3.Version > VERSION_MPEG_2_5 || mp3.SampleRateIndex > 3 {
+		return 0
+	}
+	return SampleRateTable[mp3.Version-1][mp3.SampleRateIndex]
 }
 
 func SplitMp3Frames(data []byte, onFrame func(head *MP3FrameHead, frame []byte)) error {
-    for len(data) > 0 {
-        if bytes.HasPrefix(data, []byte{'I', 'D', '3'}) {
-            if len(data) < 10 {
-                return errors.New("ID3V2 tag head must has 10 bytes")
-            }
-            fmt.Println("Get ID3 tag")
-            var size uint32 = uint32(data[7])
-            size = size<<7 | uint32(data[8])
-            size = size<<7 | uint32(data[9])
-            data = data[10+size:]
-            fmt.Println("tag size ", size)
-        } else if bytes.HasPrefix(data, []byte{'T', 'A', 'G'}) {
-            if len(data) < 128 {
-                return errors.New("ID3V1 must has 128 bytes")
-            }
-            data = data[128:]
-        } else {
-            head, err := DecodeMp3Head(data)
-            if err != nil {
-                fmt.Println(err)
-                return err
-            }
-            if onFrame != nil {
-                onFrame(head, data[:head.FrameSize])
-            }
-            data = data[head.FrameSize:]
-        }
-    }
-    return nil
+	for len(data) > 0 {
+		if bytes.HasPrefix(data, []byte{'I', 'D', '3'}) {
+			if len(data) < 10 {
+				return errors.New("ID3V2 tag head must has 10 bytes")
+			}
+			fmt.Println("Get ID3 tag")
+			var size uint32 = uint32(data[6] & 0x7F)
+			size = size<<7 | uint32(data[7]&0x7F)
+			size = size<<7 | uint32(data[8]&0x7F)
+			size = size<<7 | uint32(data[9]&0x7F)
+			if int(size)+10 > len(data) {
+				return errors.New("ID3V2 tag size beyond data")
+			}
+			data = data[10+size:]
+			fmt.Println("tag size ", size)
+		} else if bytes.HasPrefix(data, []byte{'T', 'A', 'G'}) {
+			if len(data) < 128 {
+				return errors.New("ID3V1 must has 128 bytes")
+			}
+			data = data[128:]
+		} else {
+			head, err := DecodeMp3Head(data)
+			if err != nil {
+				fmt.Println(err)
+				return err
+			}
+			if head.FrameSize > len(data) {
+				return errors.New("mp3 frame truncated")
+			}
+			if onFrame != nil {
+				onFrame(head, data[:head.FrameSize])
+			}
+			data = data[head.FrameSize:]
+		}
+	}
+	return nil
 }

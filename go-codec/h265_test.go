@@ -122,13 +122,13 @@ func TestH265RawPPS_Decode(t *testing.T) {
 func TestHevc_Update(t *testing.T) {
 	t.Run("TestHevc_Update", func(t *testing.T) {
 		hvcc := &HEVCRecordConfiguration{}
-		hvcc.UpdateVPS(vps)
-		hvcc.UpdateVPS(vps2)
-		hvcc.UpdateSPS(sps)
-		hvcc.UpdateSPS(h265sps2)
-		hvcc.UpdatePPS(pps)
-		hvcc.UpdatePPS(pps)
-		hvcc.UpdatePPS(pps2)
+		_ = hvcc.UpdateVPS(vps)
+		_ = hvcc.UpdateVPS(vps2)
+		_ = hvcc.UpdateSPS(sps)
+		_ = hvcc.UpdateSPS(h265sps2)
+		_ = hvcc.UpdatePPS(pps)
+		_ = hvcc.UpdatePPS(pps)
+		_ = hvcc.UpdatePPS(pps2)
 		fmt.Printf("%+v\n", hvcc)
 		for _, a := range hvcc.Arrays {
 			fmt.Printf("%+v\n", *a)
@@ -154,7 +154,7 @@ func TestHEVCRecordConfiguration_Decode_Encode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hvcc := &HEVCRecordConfiguration{}
-			hvcc.Decode(tt.args.hevc)
+			_ = hvcc.Decode(tt.args.hevc)
 			t.Logf("%+v\n", hvcc)
 			for _, a := range hvcc.Arrays {
 				t.Logf("%+v\n", *a)
@@ -181,7 +181,7 @@ func TestHEVCRecordConfiguration_ToNalus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hvcc := &HEVCRecordConfiguration{}
-			hvcc.Decode(src)
+			_ = hvcc.Decode(src)
 			if gotNalus := hvcc.ToNalus(); !reflect.DeepEqual(gotNalus, tt.wantNalus) {
 				t.Errorf("HEVCRecordConfiguration.ToNalus() = %v, want %v", gotNalus, tt.wantNalus)
 			}
