@@ -1,120 +1,46 @@
-# gomedia
- mpeg-ts,mpeg-ps,flv,mp4,rtmp muxer/demuxer
- 
+# GoMedia
+
+A Go library for muxing and demuxing MPEG-TS, MPEG-PS, FLV, MP4, and RTMP media streams.
+
 ## Installation
-```
+
+```bash
 go get github.com/yapingcat/gomedia
 ```
 
+## Codec Utilities
 
-## H264/H265/AAC/VP8/OPUS/MP3
- [USAGE](https://github.com/yapingcat/gomedia/blob/main/go-codec/README.md)
-  - decode sps/pps/vps/slice header
-  - decode HEVCDecoderConfigurationRecord/AVCDecoderConfigurationRecord/AAC-ADTS/AudioSpecificConfiguration
-  - encode HEVCDecoderConfigurationRecord/AVCDecoderConfigurationRecord/AAC-ADTS/AudioSpecificConfiguration
-  - decode OPUS Extradata(ID Head "OpusHead") /OPUS Packet(TOC...)
-  - encode OPUS Extradata
-  - decode VP8 Frame Tag/Key Frame Head
-  - decode MP3 Frame head
+See the [codec usage guide](go-codec/README.md) for more details.
 
-## mpeg-ts
-  - mux
-    - H264
-    - H265
-    - AAC
-    - MP3
-  - demux
-    - H264
-    - H265
-    - AAC
-    - MP3
+- Decode SPS, PPS, VPS, and slice headers
+- Decode and encode `HEVCDecoderConfigurationRecord`, `AVCDecoderConfigurationRecord`, AAC ADTS, and `AudioSpecificConfiguration`
+- Decode Opus extra data (`OpusHead`) and packets (TOC), and encode Opus extra data
+- Decode VP8 frame tags and keyframe headers
+- Decode MP3 frame headers
 
-## mpeg-ps
-  - mux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
-  - demux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
-   
-## flv
-  - mux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
-    - MP3
-  - demux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
-    - MP3
-  
-## mp4
-  - demux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
-    - MP3
-  - mux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
-    - MP3
-    - OPUS
+## Supported Formats and Codecs
 
+| Format | Mux | Demux |
+| --- | --- | --- |
+| MPEG-TS | H.264, H.265, AAC, MP3 | H.264, H.265, AAC, MP3 |
+| MPEG-PS | H.264, H.265, AAC, G.711 A-law, G.711 μ-law | H.264, H.265, AAC, G.711 A-law, G.711 μ-law |
+| FLV | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3 |
+| MP4 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3, Opus | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3 |
+| fMP4 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law | H.264, H.265, AAC, G.711 A-law, G.711 μ-law |
+| Ogg | — | Opus, VP8 |
 
-## fmp4
-  - demux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
-  - mux 
-    - H264
-    - H265
-    - AAC
-    - G711A
-    - G711U
+## RTMP
 
-## ogg
-  - demux 
-    - OPUS
-    - VP8
-  
-## rtmp
-  
-  [USAGE](https://github.com/yapingcat/gomedia/blob/main/go-rtmp/README.md)
-  
-  - support client/server
-  - support play/publish
-  - support h264/h265/aac/g711a/g711u/mp3
-  
-  
-## rtsp
+See the [RTMP usage guide](go-rtmp/README.md) for more details.
 
-  - support client/server(rfc2326)
-  - support basic/digest
-  - support rtp(rfc3550)
-  - support g711/aac/h264/h265
- 
+- Client and server support
+- Play and publish support
+- H.264, H.265, AAC, G.711 A-law, G.711 μ-law, and MP3 support
 
+## RTSP
 
-
-
-
+- Client and server support ([RFC 2326](https://datatracker.ietf.org/doc/html/rfc2326))
+- Basic and Digest authentication
+- RTP support ([RFC 3550](https://datatracker.ietf.org/doc/html/rfc3550))
+- G.711, AAC, H.264, and H.265 support
   
