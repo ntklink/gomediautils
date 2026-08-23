@@ -31,3 +31,116 @@ func TestParserSdp(t *testing.T) {
 		fmt.Printf("%+v\n", sdp.Medias[1])
 	})
 }
+
+func TestSdpRobustness(t *testing.T) {
+	var r RtpMap
+	if err := r.Decode("96 H264"); err == nil {
+		t.Fatalf("rtpmap without clock rate must error")
+	}
+	var m Media
+	if err := m.ParseMLine("video 0 RTP/AVP"); err == nil {
+		t.Fatalf("short m-line must error")
+	}
+	var s Sdp
+	if err := s.ParserSdp("=value\r\n"); err == nil {
+		t.Fatalf("empty key must error")
+	}
+	h := &H264FmtpParam{}
+	h.Load("96 packetization-mode=1;sprop-parameter-sets=Z0IAHpWoFAFuQA==")
+	if len(h.sps) == 0 || h.pps != nil {
+		t.Fatalf("sprop without comma: sps=%d pps=%v", len(h.sps), h.pps)
+	}
+}
+
+func TestFmtpOptionsReportBadValues(t *testing.T) {
+	if _, err := NewAACFmtpParam(WithAudioSpecificConfig([]byte{0x11})); err == nil {
+		t.Fatalf("a one byte audio specific config must be rejected")
+	}
+	aac, err := NewAACFmtpParam(WithAudioSpecificConfig([]byte{0x14, 0x08}))
+	if err != nil {
+		t.Fatalf("valid asc rejected: %v", err)
+	}
+	if len(aac.AudioSpecificConfig()) != 2 {
+		t.Fatalf("asc not stored")
+	}
+	if _, err := NewH264FmtpParam(WithProfileLevelId([]byte{0x42, 0x00})); err == nil {
+		t.Fatalf("a two byte profile-level-id must be rejected")
+	}
+	if _, err := NewH264FmtpParam(WithPacketizationMode(7)); err == nil {
+		t.Fatalf("packetization-mode 7 must be rejected")
+	}
+	if _, err := NewH264FmtpParam(WithH264SPS([]byte{0x00, 0x00, 0x00, 0x01})); err == nil {
+		t.Fatalf("a start code without a nalu must be rejected")
+	}
+	h264, err := NewH264FmtpParam(WithProfileLevelId([]byte{0x42, 0xA0, 0x1E}),
+		WithH264SPS([]byte{0x00, 0x00, 0x00, 0x01, 0x67, 0x42}), WithH264PPS([]byte{0x68, 0xCE}))
+	if err != nil {
+		t.Fatalf("valid h264 params rejected: %v", err)
+	}
+	sps, pps := h264.GetSpsPps()
+	if len(sps) != 2 || sps[0] != 0x67 || len(pps) != 2 {
+		t.Fatalf("sps/pps not stored: % x % x", sps, pps)
+	}
+	if _, err := NewH265FmtpParam(WithH265VPS(nil)); err == nil {
+		t.Fatalf("an empty vps must be rejected")
+	}
+}
+
+func TestFmtpLoadReportsMalformedParameters(t *testing.T) {
+	h264, _ := NewH264FmtpParam()
+	if err := h264.Load("96 sprop-parameter-sets=!!!notbase64"); err == nil {
+		t.Fatalf("illegal base64 parameter sets must be reported")
+	}
+	if err := h264.Load("96 packetization-mode=x"); err == nil {
+		t.Fatalf("illegal packetization-mode must be reported")
+	}
+	if err := h264.Load("96"); err == nil {
+		t.Fatalf("fmtp without parameters must be reported")
+	}
+	if err := h264.Load("96 packetization-mode=1;profile-level-id=64001F"); err != nil {
+		t.Fatalf("valid fmtp rejected: %v", err)
+	}
+	// a profile-level-id that was never set must not be written out
+	h265, _ := NewH265FmtpParam()
+	if err := h265.Load("96 sprop-vps=###"); err == nil {
+		t.Fatalf("illegal base64 vps must be reported")
+	}
+	aac, _ := NewAACFmtpParam()
+	if err := aac.Load("97 config=zz"); err == nil {
+		t.Fatalf("illegal hex config must be reported")
+	}
+	if err := aac.Load("97 sizelength=13;indexlength=3;config=1408"); err != nil {
+		t.Fatalf("valid aac fmtp rejected: %v", err)
+	}
+	if aac.SizeLength() != 13 || len(aac.AudioSpecificConfig()) != 2 {
+		t.Fatalf("aac fmtp not loaded: %+v", aac)
+	}
+}
+
+func TestH264SaveWithoutProfileLevelId(t *testing.T) {
+	param := &H264FmtpParam{packetizationMode: 1, profileLevelId: []byte{0x42}}
+	// a short profile-level-id must not be written out (it used to panic)
+	if s := param.Save(); s != "packetization-mode=1" {
+		t.Fatalf("save: %s", s)
+	}
+}
+
+func TestParserSdpRejectsSessionLevelRtpmap(t *testing.T) {
+	var s Sdp
+	// an "a=rtpmap" before any "m=" line used to index Medias[-1]
+	if err := s.ParserSdp("v=0\r\na=rtpmap:96 H264/90000\r\n"); err == nil {
+		t.Fatalf("session level rtpmap must be reported")
+	}
+	var s2 Sdp
+	if err := s2.ParserSdp("v=0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264\r\n"); err == nil {
+		t.Fatalf("rtpmap without clock rate must be reported")
+	}
+	var s3 Sdp
+	if err := s3.ParserSdp("v=0\r\nm=video xx RTP/AVP 96\r\n"); err == nil {
+		t.Fatalf("illegal port must be reported")
+	}
+	var s4 Sdp
+	if err := s4.ParserSdp("v=0\r\nm=audio 0 RTP/AVP 97\r\na=rtpmap:97 MPEG4-GENERIC/16000/x\r\n"); err == nil {
+		t.Fatalf("illegal channel count must be reported")
+	}
+}
