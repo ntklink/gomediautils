@@ -9,7 +9,7 @@ import (
 )
 
 // TestPlayFromRemoteServer has ffmpeg publish into a third party server and
-// gomedia's rtmp client play it back. Whatever the client hands over is
+// GoMediaUtils' rtmp client play it back. Whatever the client hands over is
 // written to a flv and checked with ffprobe, so a client that loses the
 // parameter sets or mangles a chunk fails here even though its own demuxer
 // would accept the result.
@@ -39,7 +39,7 @@ func TestPlayFromRemoteServer(t *testing.T) {
 	out := tools.Probe(t, dst)
 	video, ok := out.Video()
 	if !ok {
-		t.Fatalf("gomedia played the stream but produced no video (format %q)", out.Format.FormatName)
+		t.Fatalf("GoMediaUtils played the stream but produced no video (format %q)", out.Format.FormatName)
 	}
 	if video.CodecName != "h264" {
 		t.Errorf("video codec %q, want h264", video.CodecName)

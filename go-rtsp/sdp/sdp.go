@@ -169,7 +169,7 @@ type Sdp struct {
 func (sdp *Sdp) Encode() string {
 	name := sdp.SessionName
 	if name == "" {
-		name = "gomedia rtsp"
+		name = "GoMediaUtils rtsp"
 	}
 	conn := sdp.ConnectionData
 	if conn.Nettype == "" {

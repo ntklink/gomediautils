@@ -11,7 +11,7 @@ import (
 )
 
 // Proc is a running ffmpeg process a test started in the background, such as
-// a publisher pushing into a gomedia server.
+// a publisher pushing into a GoMediaUtils server.
 type Proc struct {
 	cmd    *exec.Cmd
 	cancel context.CancelFunc

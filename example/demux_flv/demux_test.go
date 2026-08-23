@@ -7,7 +7,7 @@ import (
 	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
-// ffmpeg writes the flv, gomedia takes it apart, and the elementary streams
+// ffmpeg writes the flv, GoMediaUtils takes it apart, and the elementary streams
 // have to decode to what ffmpeg itself would have extracted. The aac case
 // also covers the sequence header path: flv carries the audio specific
 // config in a tag of its own, and a demuxer that forgets to turn it back

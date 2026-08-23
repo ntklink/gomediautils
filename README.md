@@ -1,4 +1,4 @@
-# GoMedia
+# GoMediaUtils
 
 A Go library for muxing and demuxing MPEG-TS, MPEG-PS, FLV, MP4, and RTMP media streams.
 

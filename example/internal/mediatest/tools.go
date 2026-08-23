@@ -1,15 +1,15 @@
 // Package mediatest runs the examples against real media produced and
 // inspected by ffmpeg.
 //
-// A unit test can only show that gomedia agrees with itself: mux something,
+// A unit test can only show that GoMediaUtils agrees with itself: mux something,
 // demux it again, compare. That misses everything about whether the bytes
-// gomedia writes are a file the rest of the world can read, which is the
+// GoMediaUtils writes are a file the rest of the world can read, which is the
 // whole point of a container library. These helpers close that gap by making
 // ffmpeg the source of the input and ffprobe/ffmpeg the judge of the output.
 //
 // ffmpeg is not a build dependency. Tests that need it call Require, which
-// skips when no usable binary is found. Set GOMEDIA_FFMPEG and
-// GOMEDIA_FFPROBE to point at specific binaries, otherwise PATH is used.
+// skips when no usable binary is found. Set GOMEDIAUTILS_FFMPEG and
+// GOMEDIAUTILS_FFPROBE to point at specific binaries, otherwise PATH is used.
 package mediatest
 
 import (
@@ -48,10 +48,10 @@ func lookup() (Tools, string) {
 			p, err := exec.LookPath(name)
 			return p, err == nil
 		}
-		ffmpeg, okA := resolve("GOMEDIA_FFMPEG", "ffmpeg")
-		ffprobe, okB := resolve("GOMEDIA_FFPROBE", "ffprobe")
+		ffmpeg, okA := resolve("GOMEDIAUTILS_FFMPEG", "ffmpeg")
+		ffprobe, okB := resolve("GOMEDIAUTILS_FFPROBE", "ffprobe")
 		if !okA || !okB {
-			lookupErr = "ffmpeg and ffprobe not found; install them or set GOMEDIA_FFMPEG / GOMEDIA_FFPROBE"
+			lookupErr = "ffmpeg and ffprobe not found; install them or set GOMEDIAUTILS_FFMPEG / GOMEDIAUTILS_FFPROBE"
 			return
 		}
 		found = Tools{FFmpeg: ffmpeg, FFprobe: ffprobe}

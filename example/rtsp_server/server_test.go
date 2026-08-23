@@ -15,7 +15,7 @@ import (
 // it back. That covers the parts of the rtsp implementation no unit test can
 // reach, the request parsing, the sdp exchange, the interleaved rtp framing
 // and the h264 packetiser, against a client that follows the rfc rather than
-// gomedia's own idea of it.
+// GoMediaUtils' own idea of it.
 func TestFFmpegPushAndPullRTSP(t *testing.T) {
 	tools := mediatest.Require(t)
 

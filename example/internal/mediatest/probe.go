@@ -96,7 +96,7 @@ func (tools Tools) Probe(t *testing.T, path string) Probe {
 	return p
 }
 
-// MustProbe is Probe plus the checks every "did gomedia write a real file"
+// MustProbe is Probe plus the checks every "did GoMediaUtils write a real file"
 // test wants: ffprobe recognised the container and found the streams.
 func (tools Tools) MustProbe(t *testing.T, path string, wantStreams int) Probe {
 	t.Helper()
@@ -150,7 +150,7 @@ func (p Packet) Pos() int {
 
 // Packets lists the packets of one stream, selected the ffmpeg way ("v:0",
 // "a:0"). Timestamps are what a container library gets wrong most easily, so
-// tests compare them between the source and what gomedia wrote.
+// tests compare them between the source and what GoMediaUtils wrote.
 func (tools Tools) Packets(t *testing.T, path, stream string) []Packet {
 	t.Helper()
 	out := tools.run(t, tools.FFprobe,

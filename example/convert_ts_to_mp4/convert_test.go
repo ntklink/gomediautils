@@ -7,11 +7,11 @@ import (
 	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
-// ffmpeg writes a real transport stream, gomedia turns it into an mp4, and
+// ffmpeg writes a real transport stream, GoMediaUtils turns it into an mp4, and
 // ffmpeg has to be able to read that mp4 back and decode exactly the same
 // pictures and samples. A remux that loses a frame, drops the parameter sets
 // or mangles the composition offsets fails here even though it would still
-// "round trip" through gomedia's own demuxer.
+// "round trip" through GoMediaUtils' own demuxer.
 func TestConvertTSToMP4(t *testing.T) {
 	tools := mediatest.Require(t)
 

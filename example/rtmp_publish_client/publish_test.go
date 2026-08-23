@@ -9,13 +9,13 @@ import (
 	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
-// TestPublishToRemoteServer pushes a real clip with gomedia's rtmp client
+// TestPublishToRemoteServer pushes a real clip with GoMediaUtils' rtmp client
 // into a third party server and pulls it back with ffmpeg.
 //
-// The ffmpeg tests in this repository put a real client in front of gomedia's
-// servers. This is the other half: gomedia's *client* has to satisfy a server
+// The ffmpeg tests in this repository put a real client in front of GoMediaUtils'
+// servers. This is the other half: GoMediaUtils' *client* has to satisfy a server
 // that shares no code with it, which is where a handshake shortcut or a chunk
-// header that only gomedia's own parser accepts shows up.
+// header that only GoMediaUtils' own parser accepts shows up.
 func TestPublishToRemoteServer(t *testing.T) {
 	tools := mediatest.Require(t)
 	remote := mediatest.RequireStreamingServer(t)
@@ -29,7 +29,7 @@ func TestPublishToRemoteServer(t *testing.T) {
 	path := mediatest.UniquePath(t, "rtmp-pub")
 	url := remote.RTMPURL(path)
 
-	// pull with ffmpeg while gomedia publishes: the server only holds a live
+	// pull with ffmpeg while GoMediaUtils publishes: the server only holds a live
 	// stream for as long as a publisher is connected
 	dst := filepath.Join(t.TempDir(), "pulled.flv")
 

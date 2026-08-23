@@ -11,7 +11,7 @@ import (
 
 // The input here is what a real hls or dash player downloads: an init
 // segment and a handful of media segments as separate files. ffmpeg's hls
-// muxer writes them, gomedia joins and demuxes them, and the pictures that
+// muxer writes them, GoMediaUtils joins and demuxes them, and the pictures that
 // come out have to be the ones ffmpeg encoded.
 func TestDemuxFragments(t *testing.T) {
 	tools := mediatest.Require(t)

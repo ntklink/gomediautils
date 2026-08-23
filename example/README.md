@@ -16,26 +16,26 @@ Without ffmpeg every one of them skips, and the rest of the repository still
 builds and tests as usual. To point at a specific build:
 
 ```sh
-GOMEDIA_FFMPEG=/opt/ffmpeg/bin/ffmpeg GOMEDIA_FFPROBE=/opt/ffmpeg/bin/ffprobe go test ./example/...
+GOMEDIAUTILS_FFMPEG=/opt/ffmpeg/bin/ffmpeg GOMEDIAUTILS_FFPROBE=/opt/ffmpeg/bin/ffprobe go test ./example/...
 ```
 
 The client tests additionally want a streaming server to talk to. Put
 [mediamtx](https://github.com/bluenviron/mediamtx) on PATH (or name it with
-`GOMEDIA_MEDIAMTX`) and they start a private one on ephemeral ports:
+`GOMEDIAUTILS_MEDIAMTX`) and they start a private one on ephemeral ports:
 
 ```sh
-GOMEDIA_MEDIAMTX=/opt/mediamtx/mediamtx go test ./example/...
+GOMEDIAUTILS_MEDIAMTX=/opt/mediamtx/mediamtx go test ./example/...
 ```
 
 An already running server elsewhere works too, though its link is out of the
 test's control so the assertions there only check that media really flows:
 
 ```sh
-GOMEDIA_REMOTE=streaming.example.com go test ./example/...          # default ports
-GOMEDIA_REMOTE=streaming.example.com:1935:8554:8888 go test ./...   # rtmp:rtsp:hls
+GOMEDIAUTILS_REMOTE=streaming.example.com go test ./example/...          # default ports
+GOMEDIAUTILS_REMOTE=streaming.example.com:1935:8554:8888 go test ./...   # rtmp:rtsp:hls
 ```
 
-Source clips are cached under `$TMPDIR/gomedia-mediatest-cache`, so a second
+Source clips are cached under `$TMPDIR/gomediautils-mediatest-cache`, so a second
 run does no encoding. Delete that directory to force a regenerate.
 
 ## What the tests check
@@ -51,8 +51,8 @@ implementation on the other end instead.
   find the streams, and `ffmpeg -xerror -err_detect explode` has to decode the
   whole file without a single warning.
 - **The pictures have to survive.** The decisive check is a checksum of the
-  decoded frames: the source and whatever gomedia wrote are both decoded to
-  raw yuv and the hashes compared. A remux that drops a frame, loses the
+  decoded frames: the source and whatever GoMediaUtils wrote are both decoded
+  to raw yuv and the hashes compared. A remux that drops a frame, loses the
   parameter sets or mangles a composition offset fails there even when every
   count still matches.
 - **Timestamps have to make sense.** Decode timestamps must not go backwards,
@@ -61,19 +61,19 @@ implementation on the other end instead.
 The network examples go further and put a real peer on the wire, in both
 directions:
 
-- **gomedia's servers, ffmpeg's clients.** ffmpeg publishes into the rtmp and
+- **GoMediaUtils' servers, ffmpeg's clients.** ffmpeg publishes into the rtmp and
   rtsp servers and plays back out of them, over the same handshake, chunking,
   sdp and rtp framing any other client would use.
-- **gomedia's clients, somebody else's server.** The rtmp and rtsp clients
+- **GoMediaUtils' clients, somebody else's server.** The rtmp and rtsp clients
   publish into and play out of mediamtx, whose rtsp side is gortsplib. Neither
-  shares any code or assumption with this library, so a shortcut that gomedia
-  and gomedia happen to agree on fails there.
+  shares any code or assumption with this library, so a shortcut that two
+  GoMediaUtils components happen to agree on fails there.
 
 A few tests measure against what actually arrived rather than against the
 file that was sent. `demux_ts_over_rtp` records the bytes off the socket and
 demuxes that recording with ffmpeg, because ffmpeg's rtp sender only emits
-full datagrams and quietly drops the last partial one; holding gomedia to the
-source file would be measuring that instead.
+full datagrams and quietly drops the last partial one; holding GoMediaUtils to
+the source file would be measuring that instead.
 
 ## Covered examples
 
@@ -121,16 +121,16 @@ source file would be measuring that instead.
 | --- | --- |
 | `rtmp_server` | ffmpeg publishes and plays over rtmp |
 | `rtsp_server` | ffmpeg announces, pushes and plays over rtsp, with digest auth |
-| `rtsp_play_server` | ffmpeg plays mpeg-ts over rtp from gomedia, over tcp and udp |
+| `rtsp_play_server` | ffmpeg plays mpeg-ts over rtp from GoMediaUtils, over tcp and udp |
 | `http_flv_server` | http-flv, remuxed per frame, plus a path traversal check |
-| `rtmp_publish_client` | gomedia publishes into a third party server |
-| `rtmp_play_client` | gomedia plays from a third party server |
-| `mp4_to_rtmp_server` | gomedia publishes an mp4, interleaved and with b frame timing |
-| `rtsp_play_client_rtp_over_rtsp` | gomedia plays rtsp with interleaved rtp |
+| `rtmp_publish_client` | GoMediaUtils publishes into a third party server |
+| `rtmp_play_client` | GoMediaUtils plays from a third party server |
+| `mp4_to_rtmp_server` | GoMediaUtils publishes an mp4, interleaved and with b frame timing |
+| `rtsp_play_client_rtp_over_rtsp` | GoMediaUtils plays rtsp with interleaved rtp |
 | `rtsp_client_rtp_over_udp` | the same over its own udp port pair |
-| `rtsp_push_client_rtp_over_rtsp` | gomedia announces and records into gortsplib |
-| `http_flv_client` | gomedia pulls http-flv and parses it as it arrives |
-| `demux_ts_over_rtp` | ffmpeg sends mpeg-ts over rtp, gomedia reassembles it |
+| `rtsp_push_client_rtp_over_rtsp` | GoMediaUtils announces and records into gortsplib |
+| `http_flv_client` | GoMediaUtils pulls http-flv and parses it as it arrives |
+| `demux_ts_over_rtp` | ffmpeg sends mpeg-ts over rtp, GoMediaUtils reassembles it |
 
 ## Helper package
 

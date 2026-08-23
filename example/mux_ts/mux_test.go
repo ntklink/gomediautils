@@ -10,7 +10,7 @@ import (
 // The ts muxer is fed a bare Annex-B stream that ffmpeg produced and the
 // result has to be a transport stream ffmpeg can demux back into the same
 // pictures. This is the direction the unit tests cannot check on their own:
-// a muxer that agrees with gomedia's own demuxer can still write a pat, pmt
+// a muxer that agrees with GoMediaUtils' own demuxer can still write a pat, pmt
 // or pes header no other implementation accepts.
 func TestMuxH264ToTS(t *testing.T) {
 	tools := mediatest.Require(t)

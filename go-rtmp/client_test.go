@@ -13,13 +13,13 @@ import (
 )
 
 // netTestAddr returns the rtmp server used by the network tests, they are skipped unless
-// GOMEDIA_NET_TEST=1 is set (GOMEDIA_RTMP_ADDR overrides the default address)
+// GOMEDIAUTILS_NET_TEST=1 is set (GOMEDIAUTILS_RTMP_ADDR overrides the default address)
 func netTestAddr(t *testing.T) string {
 	t.Helper()
-	if os.Getenv("GOMEDIA_NET_TEST") != "1" {
-		t.Skip("network test, set GOMEDIA_NET_TEST=1 to run")
+	if os.Getenv("GOMEDIAUTILS_NET_TEST") != "1" {
+		t.Skip("network test, set GOMEDIAUTILS_NET_TEST=1 to run")
 	}
-	if addr := os.Getenv("GOMEDIA_RTMP_ADDR"); addr != "" {
+	if addr := os.Getenv("GOMEDIAUTILS_RTMP_ADDR"); addr != "" {
 		return addr
 	}
 	return "49.235.110.177:1935"

@@ -13,7 +13,7 @@ import (
 // fetch the init segment, parse the moov out of it and then decode every
 // media segment against it. A wrong track id, a bad tfhd base offset or a
 // trun the moov does not match all show up as a stream ffmpeg cannot play,
-// while gomedia's own demuxer would happily read its own output.
+// while GoMediaUtils' own demuxer would happily read its own output.
 func TestGenerateHLS(t *testing.T) {
 	tools := mediatest.Require(t)
 

@@ -15,7 +15,7 @@ import (
 )
 
 // The client is pointed at an ffmpeg-fed http-flv stream, so what it parses
-// came from a real muxer rather than from gomedia's own writer.
+// came from a real muxer rather than from GoMediaUtils' own writer.
 func TestPullFLVFromFFmpeg(t *testing.T) {
 	tools := mediatest.Require(t)
 

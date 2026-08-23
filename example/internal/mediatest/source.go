@@ -206,7 +206,7 @@ var cacheOnce sync.Once
 // turns a second `go test` from seconds of encoding into no encoding at all.
 func cacheDir(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(os.TempDir(), "gomedia-mediatest-cache")
+	dir := filepath.Join(os.TempDir(), "gomediautils-mediatest-cache")
 	cacheOnce.Do(func() {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			panic(err)
@@ -228,7 +228,7 @@ var elementaryFormat = map[string]string{
 
 // ExtractStream copies one stream out of a container into a bare elementary
 // stream file, without re-encoding. This is the reference the demux examples
-// are measured against: whatever ffmpeg pulls out is what gomedia has to
+// are measured against: whatever ffmpeg pulls out is what GoMediaUtils has to
 // pull out too.
 //
 // mapSpec is an ffmpeg -map selector such as "0:v:0"; ext names both the

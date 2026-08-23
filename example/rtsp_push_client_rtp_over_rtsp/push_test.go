@@ -9,12 +9,12 @@ import (
 	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
-// This is the direction the play client cannot cover: gomedia writes the sdp,
+// This is the direction the play client cannot cover: GoMediaUtils writes the sdp,
 // packetises h264 into rtp itself and interleaves it over the rtsp
 // connection, and a server that shares no code with it has to accept all
 // three. A wrong sdp fmtp line, a payload type the announce never declared or
 // an interleaved frame header off by a byte all end here rather than in a
-// round trip against gomedia's own parser.
+// round trip against GoMediaUtils' own parser.
 func TestPushFLVToRemoteServer(t *testing.T) {
 	tools := mediatest.Require(t)
 	remote := mediatest.RequireStreamingServer(t)

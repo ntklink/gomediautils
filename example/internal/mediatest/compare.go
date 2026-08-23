@@ -69,7 +69,7 @@ func AssertMonotonicDts(t *testing.T, packets []Packet, what string) {
 }
 
 // AssertSameTimestamps fails when two packet lists do not carry the same
-// presentation times, within tolerance. gomedia rounds timestamps to
+// presentation times, within tolerance. GoMediaUtils rounds timestamps to
 // milliseconds on the way through, so an exact comparison would be wrong.
 func AssertSameTimestamps(t *testing.T, want, got []Packet, tolerance float64, what string) {
 	t.Helper()

@@ -11,9 +11,9 @@ import (
 	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
-// ffmpeg has no program stream demuxer that reads what gomedia writes (its
+// ffmpeg has no program stream demuxer that reads what GoMediaUtils writes (its
 // mpeg demuxer only handles mpeg1/mpeg2 video), so the check goes the other
-// way: gomedia's own ps demuxer takes the file apart again and the
+// way: GoMediaUtils' own ps demuxer takes the file apart again and the
 // elementary stream that comes out is handed to ffmpeg, which decodes it and
 // has to see the same pictures that went in.
 func TestMuxElementaryStreamToPS(t *testing.T) {

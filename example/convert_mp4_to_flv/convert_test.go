@@ -8,7 +8,7 @@ import (
 )
 
 // The mp4 demuxer and the flv muxer are exercised together against real
-// files: ffmpeg makes the mp4, gomedia converts, ffmpeg decodes the flv.
+// files: ffmpeg makes the mp4, GoMediaUtils converts, ffmpeg decodes the flv.
 func TestConvertMP4ToFLV(t *testing.T) {
 	tools := mediatest.Require(t)
 

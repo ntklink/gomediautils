@@ -12,7 +12,7 @@ import (
 
 // mp4 is the awkward source to publish from: samples come out of the
 // demuxer a track at a time, and video carries a composition offset that has
-// to survive the trip into rtmp's separate pts and dts. gomedia publishes,
+// to survive the trip into rtmp's separate pts and dts. GoMediaUtils publishes,
 // a third party server relays, and ffmpeg pulls the result back.
 func TestPublishMP4ToRemoteServer(t *testing.T) {
 	tools := mediatest.Require(t)

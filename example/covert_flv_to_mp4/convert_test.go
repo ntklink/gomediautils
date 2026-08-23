@@ -7,7 +7,7 @@ import (
 	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
-// ffmpeg writes a real flv, gomedia turns it into an mp4, and ffmpeg has to
+// ffmpeg writes a real flv, GoMediaUtils turns it into an mp4, and ffmpeg has to
 // decode the same pictures out of the result.
 func TestConvertFLVToMP4(t *testing.T) {
 	tools := mediatest.Require(t)

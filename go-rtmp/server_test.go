@@ -13,11 +13,11 @@ import (
 )
 
 // the server tests block forever waiting for a real rtmp client, run them only when
-// GOMEDIA_NET_TEST=1 is set
+// GOMEDIAUTILS_NET_TEST=1 is set
 func skipUnlessNetTest(t *testing.T) {
 	t.Helper()
-	if os.Getenv("GOMEDIA_NET_TEST") != "1" {
-		t.Skip("network test, set GOMEDIA_NET_TEST=1 to run")
+	if os.Getenv("GOMEDIAUTILS_NET_TEST") != "1" {
+		t.Skip("network test, set GOMEDIAUTILS_NET_TEST=1 to run")
 	}
 }
 

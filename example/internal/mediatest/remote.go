@@ -13,9 +13,9 @@ import (
 
 // Remote is an external streaming server the tests interoperate with.
 //
-// The ffmpeg tests put a real client on the other end of gomedia's servers.
+// The ffmpeg tests put a real client on the other end of GoMediaUtils' servers.
 // A remote server is the mirror image: it puts a real *server* on the other
-// end of gomedia's clients. mediamtx is a good one to point at, its rtsp side
+// end of GoMediaUtils' clients. mediamtx is a good one to point at, its rtsp side
 // is gortsplib and its rtmp side is its own, so neither shares any code or
 // assumption with this library.
 type Remote struct {
@@ -37,17 +37,17 @@ type Remote struct {
 }
 
 // RequireRemote returns the configured remote server, skipping the test when
-// there is none. Set GOMEDIA_REMOTE to a host name or address, optionally
+// there is none. Set GOMEDIAUTILS_REMOTE to a host name or address, optionally
 // with ports: "example.com" or "example.com:1935:8554:8888".
 func RequireRemote(t *testing.T) Remote {
 	t.Helper()
-	spec := os.Getenv("GOMEDIA_REMOTE")
+	spec := os.Getenv("GOMEDIAUTILS_REMOTE")
 	if spec == "" {
-		t.Skip("no remote streaming server configured; set GOMEDIA_REMOTE=<host> to run the interop tests")
+		t.Skip("no remote streaming server configured; set GOMEDIAUTILS_REMOTE=<host> to run the interop tests")
 	}
 	r, err := parseRemote(spec)
 	if err != nil {
-		t.Fatalf("GOMEDIA_REMOTE=%q: %v", spec, err)
+		t.Fatalf("GOMEDIAUTILS_REMOTE=%q: %v", spec, err)
 	}
 	if err := r.reachable(); err != nil {
 		t.Skipf("remote server %s is not reachable: %v", r.Host, err)
@@ -135,7 +135,7 @@ var pathCounter uint64
 func UniquePath(t *testing.T, prefix string) string {
 	t.Helper()
 	n := atomic.AddUint64(&pathCounter, 1)
-	return fmt.Sprintf("live/gomedia-%s-%d-%d", prefix, os.Getpid(), n)
+	return fmt.Sprintf("live/gomediautils-%s-%d-%d", prefix, os.Getpid(), n)
 }
 
 // WaitStreamReady blocks until the remote server answers a play request for

@@ -50,8 +50,8 @@ paths:
 //
 // A local mediamtx is preferred: it makes the tests deterministic, so they can
 // assert on exact frame counts rather than on "enough frames arrived". Point
-// GOMEDIA_MEDIAMTX at the binary, or put it on PATH. Failing that,
-// GOMEDIA_REMOTE names an already running server somewhere else, where the
+// GOMEDIAUTILS_MEDIAMTX at the binary, or put it on PATH. Failing that,
+// GOMEDIAUTILS_REMOTE names an already running server somewhere else, where the
 // link is out of the test's control and the assertions have to be looser;
 // Remote.Local says which one a test got.
 func RequireStreamingServer(t *testing.T) Remote {
@@ -59,15 +59,15 @@ func RequireStreamingServer(t *testing.T) Remote {
 	if bin := findMediaMTX(); bin != "" {
 		return startMediaMTX(t, bin)
 	}
-	if os.Getenv("GOMEDIA_REMOTE") != "" {
+	if os.Getenv("GOMEDIAUTILS_REMOTE") != "" {
 		return RequireRemote(t)
 	}
-	t.Skip("no streaming server available; install mediamtx (or set GOMEDIA_MEDIAMTX) to run the interop tests")
+	t.Skip("no streaming server available; install mediamtx (or set GOMEDIAUTILS_MEDIAMTX) to run the interop tests")
 	return Remote{}
 }
 
 func findMediaMTX() string {
-	if p := os.Getenv("GOMEDIA_MEDIAMTX"); p != "" {
+	if p := os.Getenv("GOMEDIAUTILS_MEDIAMTX"); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

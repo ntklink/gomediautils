@@ -8,8 +8,8 @@ import (
 )
 
 // The program stream muxer is what gb28181 pipelines rely on, and a device
-// that produces a stream only gomedia can read is no use. ffmpeg writes the
-// input, gomedia converts it and ffmpeg has to demux the result back into the
+// that produces a stream only GoMediaUtils can read is no use. ffmpeg writes the
+// input, GoMediaUtils converts it and ffmpeg has to demux the result back into the
 // same pictures.
 func TestMuxTSToPS(t *testing.T) {
 	tools := mediatest.Require(t)

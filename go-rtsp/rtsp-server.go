@@ -71,7 +71,7 @@ func NewRtspServer(handle ServerHandle, opt ...ServerOption) (*RtspServer, error
 	server := &RtspServer{
 		handle:     handle,
 		auth:       nil,
-		realm:      "gomedia server",
+		realm:      "GoMediaUtils server",
 		tracks:     make(map[string]*RtspTrack),
 		sdpContext: &sdp.Sdp{},
 		isRecord:   false,

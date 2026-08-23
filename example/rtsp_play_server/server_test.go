@@ -9,7 +9,7 @@ import (
 	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
-// ffmpeg is the client here, so gomedia's rtsp *server* has to satisfy an
+// ffmpeg is the client here, so GoMediaUtils' rtsp *server* has to satisfy an
 // implementation that shares no code with it: the sdp it writes, the
 // transport it agrees to and the rtp it sends all have to be right by the
 // rfc. Both transports are covered, because they take completely different

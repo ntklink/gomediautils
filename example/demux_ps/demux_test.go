@@ -9,9 +9,9 @@ import (
 	"github.com/ntklink/gomediautils/go-mpeg2"
 )
 
-// ffmpeg has no program stream muxer that gomedia's demuxer would recognise
+// ffmpeg has no program stream muxer that GoMediaUtils' demuxer would recognise
 // (its vob/mpeg muxer only carries mpeg1/mpeg2 video), so the ps file under
-// test is written by gomedia's own ps muxer from an ffmpeg encoded ts. What
+// test is written by GoMediaUtils' own ps muxer from an ffmpeg encoded ts. What
 // the test then checks is the round trip: the elementary streams that come
 // back out have to decode to the same pictures ffmpeg put in.
 func TestDemuxPS(t *testing.T) {

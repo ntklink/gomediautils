@@ -80,7 +80,7 @@ func TestReadMP3SkipsID3Tag(t *testing.T) {
 		"-i", bare, "-c", "copy",
 		"-id3v2_version", "3", "-write_xing", "0",
 		"-metadata", "title=a title long enough to matter",
-		"-metadata", "artist=gomedia",
+		"-metadata", "artist=gomediautils",
 		"-f", "mp3", tagged)...)
 
 	if st, err := os.Stat(tagged); err != nil || st.Size() <= fileSize(t, bare) {

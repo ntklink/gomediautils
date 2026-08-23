@@ -10,11 +10,11 @@ import (
 )
 
 // TestPlayRTSPFromServer has ffmpeg publish into a third party rtsp server and
-// gomedia's rtsp client play it back with rtp interleaved over the rtsp
+// GoMediaUtils' rtsp client play it back with rtp interleaved over the rtsp
 // connection.
 //
 // The server side of this exchange is gortsplib, which shares no code with
-// gomedia, so the sdp gomedia parses, the transport it negotiates and the
+// GoMediaUtils, so the sdp GoMediaUtils parses, the transport it negotiates and the
 // rtp depacketising it does all have to be right by the rfc rather than by
 // agreement with itself.
 func TestPlayRTSPFromServer(t *testing.T) {

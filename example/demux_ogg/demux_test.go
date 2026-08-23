@@ -7,7 +7,7 @@ import (
 	"github.com/ntklink/gomediautils/example/internal/mediatest"
 )
 
-// ffmpeg writes an ogg file, gomedia pulls the opus stream out of it and
+// ffmpeg writes an ogg file, GoMediaUtils pulls the opus stream out of it and
 // writes an mp4, and ffmpeg has to decode the same audio out of that.
 //
 // This is the only coverage the ogg demuxer gets against a real file: page

@@ -19,14 +19,14 @@ import (
 // The reference is not the source clip but the bytes that actually arrived,
 // recorded as they came off the socket. ffmpeg's rtp sender only emits full
 // datagrams, so it silently drops the last partial one and the tail of the
-// clip never leaves the machine; measuring gomedia against the file would
+// clip never leaves the machine; measuring GoMediaUtils against the file would
 // be measuring that instead. Recording the wire and demuxing it with ffmpeg
-// gives the exact answer gomedia has to match.
+// gives the exact answer GoMediaUtils has to match.
 //
 // The clip is sent with -re, at the rate a real encoder would. udp has no
 // flow control, so blasting a file at loopback as fast as it can be read
 // overruns the receive buffer and the test starts failing on dropped
-// packets rather than on anything gomedia did.
+// packets rather than on anything GoMediaUtils did.
 func TestReceiveTSOverRTP(t *testing.T) {
 	tools := mediatest.Require(t)
 
@@ -88,7 +88,7 @@ func TestReceiveTSOverRTP(t *testing.T) {
 		t.Fatalf("no aac stream was received, got %v", files)
 	}
 
-	// what gomedia pulled out of the live stream has to match what ffmpeg
+	// what GoMediaUtils pulled out of the live stream has to match what ffmpeg
 	// pulls out of the same bytes
 	tools.AssertSameDecoded(t, tools.ExtractStream(t, recording, "0:v:0", "h264"), videoPath, "v:0")
 	tools.AssertSameDecoded(t, tools.ExtractStream(t, recording, "0:a:0", "aac"), audioPath, "a:0")

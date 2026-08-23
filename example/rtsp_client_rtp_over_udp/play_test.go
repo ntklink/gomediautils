@@ -14,7 +14,7 @@ import (
 // the transport header, understand the ports the server names back and then
 // survive packets arriving on a socket with no ordering guarantee at all.
 // gortsplib is the server, so every one of those has to be right by the rfc
-// rather than by agreement with gomedia's own server.
+// rather than by agreement with GoMediaUtils' own server.
 func TestPlayRTSPOverUDP(t *testing.T) {
 	tools := mediatest.Require(t)
 	remote := mediatest.RequireStreamingServer(t)
