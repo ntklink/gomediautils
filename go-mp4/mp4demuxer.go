@@ -135,6 +135,7 @@ func (demuxer *MovDemuxer) remainingFileSize() (int64, int64, error) {
 func (demuxer *MovDemuxer) ReadHead() ([]TrackInfo, error) {
 	infos := make([]TrackInfo, 0, 2)
 	var err error
+readLoop:
 	for {
 		fullbox := FullBox{}
 		basebox := BasicBox{}
@@ -191,18 +192,18 @@ func (demuxer *MovDemuxer) ReadHead() ([]TrackInfo, error) {
 		case mov_tag([4]byte{'m', 'd', 'a', 't'}):
 			var currentOffset int64
 			if currentOffset, err = demuxer.reader.Seek(0, io.SeekCurrent); err != nil {
-				break
+				break readLoop
 			}
 			demuxer.mdatOffset = append(demuxer.mdatOffset, uint64(currentOffset))
 			_, err = demuxer.reader.Seek(int64(payloadLen), io.SeekCurrent)
 		case mov_tag([4]byte{'m', 'o', 'o', 'v'}):
 			var remain int64
 			if _, remain, err = demuxer.remainingFileSize(); err != nil {
-				break
+				break readLoop
 			}
 			if uint64(remain) < payloadLen {
 				err = errors.New("incomplete mp4 file")
-				break
+				break readLoop
 			}
 		case mov_tag([4]byte{'m', 'v', 'h', 'd'}):
 			err = decodeMvhd(demuxer)
@@ -288,7 +289,7 @@ func (demuxer *MovDemuxer) ReadHead() ([]TrackInfo, error) {
 			demuxer.isFragement = true
 		case mov_tag([4]byte{'m', 'o', 'o', 'f'}):
 			if demuxer.moofOffset, err = demuxer.reader.Seek(0, io.SeekCurrent); err != nil {
-				break
+				break readLoop
 			}
 			demuxer.moofOffset -= int64(hdrLen)
 			demuxer.dataOffset = size32 + 8
@@ -454,19 +455,20 @@ func (demuxer *MovDemuxer) ReadPacket() (*AVPacket, error) {
 				return nil, err
 			}
 		}
-		if whichTrack.cid == MP4_CODEC_H264 {
+		switch whichTrack.cid {
+		case MP4_CODEC_H264:
 			extra, ok := whichTrack.extra.(*h264ExtraData)
 			if !ok {
 				return nil, errors.New("mp4: h264 track has no avcC extra data")
 			}
 			avpkg.Data = demuxer.processH264(sample, extra)
-		} else if whichTrack.cid == MP4_CODEC_H265 {
+		case MP4_CODEC_H265:
 			extra, ok := whichTrack.extra.(*h265ExtraData)
 			if !ok {
 				return nil, errors.New("mp4: h265 track has no hvcC extra data")
 			}
 			avpkg.Data = demuxer.processH265(sample, extra)
-		} else if whichTrack.cid == MP4_CODEC_AAC {
+		case MP4_CODEC_AAC:
 			aacExtra, ok := whichTrack.extra.(*aacExtraData)
 			if !ok {
 				return nil, errors.New("mp4: aac track has no esds extra data")
@@ -476,7 +478,7 @@ func (demuxer *MovDemuxer) ReadPacket() (*AVPacket, error) {
 				return nil, err
 			}
 			avpkg.Data = append(adts.Encode(), sample...)
-		} else {
+		default:
 			avpkg.Data = sample
 		}
 		if len(avpkg.Data) > 0 {

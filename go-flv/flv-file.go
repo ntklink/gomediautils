@@ -121,7 +121,9 @@ func (f *FlvReader) Input(data []byte) (err error) {
 			if len(buf) < int(FLVTAG_SIZE) {
 				goto end
 			}
-			f.flvTag.Decode(buf)
+			if err = f.flvTag.Decode(buf); err != nil {
+				goto end
+			}
 			buf = buf[FLVTAG_SIZE:]
 			if f.flvTag.TagType == uint8(VIDEO_TAG) {
 				if f.videoDemuxer == nil {

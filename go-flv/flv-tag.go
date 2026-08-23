@@ -54,12 +54,18 @@ func (ftag FlvTag) appendTo(dst []byte) []byte {
 		byte(ftag.StreamID>>16), byte(ftag.StreamID>>8), byte(ftag.StreamID))
 }
 
-func (ftag *FlvTag) Decode(data []byte) {
+// Decode reads the 11 byte tag header at the start of data. It reports a
+// buffer that does not hold a complete header instead of reading past its end.
+func (ftag *FlvTag) Decode(data []byte) error {
+	if len(data) < int(FLVTAG_SIZE) {
+		return errors.New("flv: tag header size < 11")
+	}
 	ftag.TagType = data[0] & 0x1F
 	ftag.DataSize = GetUint24(data[1:])
 	ftag.Timestamp = GetUint24(data[4:])
 	ftag.TimestampExtended = data[7]
 	ftag.StreamID = GetUint24(data[8:])
+	return nil
 }
 
 // Video Tag
@@ -115,8 +121,13 @@ func (vtag VideoTag) Encode() (tag []byte) {
 	return
 }
 
-// 外部已经确保len(data) >= 5
+// Decode reads a video tag header. Every field is only read when data is long
+// enough to hold it, so a truncated tag leaves the remaining fields zero
+// instead of reading past the end of the buffer.
 func (vtag *VideoTag) Decode(data []byte) {
+	if len(data) < 5 {
+		return
+	}
 	isExHeader := data[0] & 0x80
 	if isExHeader != 0 {
 		// enhanced flv
@@ -128,7 +139,7 @@ func (vtag *VideoTag) Decode(data []byte) {
 			// hevc
 			vtag.CodecId = uint8(FLV_HEVC)
 
-			if vtag.AVCPacketType == PacketTypeCodedFrames {
+			if vtag.AVCPacketType == PacketTypeCodedFrames && len(data) >= 8 {
 				vtag.CompositionTime = int32(GetUint24(data[5:]))
 			}
 		}

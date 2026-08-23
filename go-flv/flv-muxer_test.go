@@ -122,7 +122,9 @@ func TestFlvMuxerWriteFramesHeader(t *testing.T) {
 	}
 	for _, tag := range tags {
 		var ft FlvTag
-		ft.Decode(tag)
+		if err := ft.Decode(tag); err != nil {
+			t.Fatalf("decode tag header: %v", err)
+		}
 		if ft.TagType != uint8(VIDEO_TAG) || int(ft.DataSize) != len(tag)-11 || ft.Timestamp != 0x020300 || ft.TimestampExtended != 1 {
 			t.Fatalf("bad tag header %+v", ft)
 		}

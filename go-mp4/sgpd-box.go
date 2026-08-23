@@ -72,11 +72,18 @@ func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
 	}
 	entryCount := int(binary.BigEndian.Uint32(buf[n:]))
 	n += 4
+	// every entry occupies at least one byte, so a count larger than what is
+	// left of the box can only come from a broken file: reject it instead of
+	// spinning over the entry loop billions of times
+	if err = checkTableSize(uint32(entryCount), 1, int64(len(buf)-n)); err != nil {
+		return
+	}
 
 	for i := 0; i < entryCount; i++ {
 		if n >= len(buf) {
 			return errBoxTruncated
 		}
+		entryStart := n
 		var descriptionLength = b.DefaultLength
 		if b.Version >= 1 && b.DefaultLength == 0 {
 			if err = checkRemain(buf, n, 4); err != nil {
@@ -94,6 +101,11 @@ func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
 		n += offset
 		if err != nil {
 			return err
+		}
+		if n <= entryStart {
+			// this package has no decoder for the grouping type, so the entry
+			// length is unknown and the remaining entries cannot be located
+			return nil
 		}
 		if sgEntry == nil {
 			continue
