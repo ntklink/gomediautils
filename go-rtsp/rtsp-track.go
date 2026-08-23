@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/yapingcat/gomedia/go-codec"
@@ -39,9 +40,14 @@ type RtspTrack struct {
 	paramHandler sdp.FmtpCodecParamParser
 	initSequence uint16
 	ssrc         uint32
-	recvCtx      *rtcp.RtcpContext
-	sendCtx      *rtcp.RtcpContext
-	autoSendRR   bool
+	// recvMtx guards recvCtx, which is created lazily on the first rtp
+	// packet because its initial sequence number comes from that packet.
+	// Over udp the rtp and the rtcp arrive on two sockets, so the goroutine
+	// that creates it is not the one that reads it.
+	recvMtx    sync.Mutex
+	recvCtx    *rtcp.RtcpContext
+	sendCtx    *rtcp.RtcpContext
+	autoSendRR bool
 }
 
 type PacketCallBack func(b []byte, isRtcp bool) error
@@ -81,16 +87,23 @@ func newTrack(name string, codec RtspCodec, opt ...TrackOption) *RtspTrack {
 	for _, o := range opt {
 		o(track)
 	}
+	if track.paramHandler == nil {
+		// Without an "a=fmtp" line a receiver has to fall back on the
+		// defaults of rfc6184, and for h264 that means packetization-mode=0,
+		// single nalu per packet. The packer fragments anything larger than
+		// the mtu, so a description with no fmtp promises something the
+		// sender does not do; gortsplib, and so mediamtx, rejects the
+		// publish outright. The default parser says what is actually sent.
+		track.paramHandler = sdp.CreateFmtpParamParser(GetEncodeNameByCodecId(codec.Cid))
+	}
 	track.ssrc = rand.Uint32()
 	track.unpack = track.createUnpacker()
 	track.pack = track.createPacker()
 	track.sendCtx = rtcp.NewRtcpContext(track.ssrc, track.initSequence, track.Codec.SampleRate)
 	if track.unpack != nil {
 		track.unpack.HookRtp(func(pkg *rtp.RtpPacket) {
-			if track.recvCtx == nil {
-				track.recvCtx = rtcp.NewRtcpContext(track.ssrc, pkg.Header.SequenceNumber, track.Codec.SampleRate)
-			}
-			track.recvCtx.ReceivedRtp(pkg)
+			ctx := track.receiveContext(pkg.Header.SequenceNumber)
+			ctx.ReceivedRtp(pkg)
 		})
 	}
 	if track.pack != nil {
@@ -230,7 +243,22 @@ func (track *RtspTrack) GetRtcpSendContext() *rtcp.RtcpContext {
 	return track.sendCtx
 }
 
+// GetRtcpRecvContext returns the receive statistics, or nil when no rtp has
+// arrived yet.
 func (track *RtspTrack) GetRtcpRecvContext() *rtcp.RtcpContext {
+	track.recvMtx.Lock()
+	defer track.recvMtx.Unlock()
+	return track.recvCtx
+}
+
+// receiveContext returns the receive context, creating it from the sequence
+// number of the first packet if this is the first one.
+func (track *RtspTrack) receiveContext(firstSeq uint16) *rtcp.RtcpContext {
+	track.recvMtx.Lock()
+	defer track.recvMtx.Unlock()
+	if track.recvCtx == nil {
+		track.recvCtx = rtcp.NewRtcpContext(track.ssrc, firstSeq, track.Codec.SampleRate)
+	}
 	return track.recvCtx
 }
 
@@ -247,10 +275,11 @@ func (track *RtspTrack) SendReport() error {
 }
 
 func (track *RtspTrack) ReceiveReport() error {
-	if track.recvCtx == nil {
+	ctx := track.GetRtcpRecvContext()
+	if ctx == nil {
 		return errors.New("no rtp received yet")
 	}
-	rr := track.recvCtx.GenerateRR()
+	rr := ctx.GenerateRR()
 	return track.sendRtcp(rr.Encode())
 }
 
@@ -300,8 +329,8 @@ func (track *RtspTrack) inputRtcp(data []byte) error {
 		if err := sr.Decode(data); err != nil {
 			return err
 		}
-		if track.recvCtx != nil {
-			track.recvCtx.ReceivedSR(sr)
+		if ctx := track.GetRtcpRecvContext(); ctx != nil {
+			ctx.ReceivedSR(sr)
 			if track.autoSendRR {
 				if err := track.ReceiveReport(); err != nil {
 					return fmt.Errorf("send receiver report: %w", err)

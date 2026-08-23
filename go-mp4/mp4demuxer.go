@@ -18,10 +18,11 @@ type AVPacket struct {
 }
 
 type SyncSample struct {
-	Pts    uint64
-	Dts    uint64
-	Size   uint32
-	Offset uint32
+	Pts uint64
+	Dts uint64
+	// Size and Offset are file offsets: a mp4 larger than 4 GiB needs 64 bits
+	Size   uint64
+	Offset uint64
 }
 
 type SubSample struct {
@@ -50,8 +51,14 @@ type TrackInfo struct {
 	SampleCount  uint32
 	ChannelCount uint8
 	Timescale    uint32
-	StartDts     uint64
-	EndDts       uint64
+	// StartDts is the decode time of the first sample, in milliseconds.
+	StartDts uint64
+	// EndDts is where the track's timeline ends, in milliseconds: the
+	// decode time of the last sample plus how long it lasts, not the decode
+	// time of the last sample itself. It is an exclusive bound, so
+	// [StartDts, EndDts) covers every sample and EndDts-StartDts is the
+	// track's duration.
+	EndDts uint64
 }
 
 type Mp4Info struct {
@@ -69,7 +76,6 @@ type MovDemuxer struct {
 	mdatOffset    []uint64 //一个mp4文件可能存在多个mdatbox
 	tracks        []*mp4track
 	readSampleIdx []uint32
-	mp4out        []byte
 	mp4Info       Mp4Info
 
 	//for demux fmp4
@@ -351,11 +357,35 @@ readLoop:
 		info.Timescale = track.timescale
 		if len(track.samplelist) > 0 {
 			info.StartDts = track.samplelist[0].dts * 1000 / uint64(track.timescale)
-			info.EndDts = track.samplelist[len(track.samplelist)-1].dts * 1000 / uint64(track.timescale)
+			info.EndDts = trackEndDts(track)
 		}
 		infos = append(infos, info)
 	}
 	return infos, nil
+}
+
+// trackEndDts is where a track's timeline ends, in milliseconds.
+//
+// The sample table gives every sample a decode time but nothing says how
+// long the last one lasts, so the media header's duration is used when it
+// covers the whole table. When it does not, which happens with a truncated
+// or hand written file, the last interval is repeated: assuming the final
+// sample lasts as long as the one before it is a far better guess than
+// treating it as instantaneous, and it keeps [StartDts, EndDts) a range
+// that actually contains the last sample.
+func trackEndDts(track *mp4track) uint64 {
+	samples := track.samplelist
+	last := samples[len(samples)-1].dts
+	toMs := func(v uint64) uint64 { return v * 1000 / uint64(track.timescale) }
+
+	if end := uint64(track.duration); end > last {
+		return toMs(end)
+	}
+	delta := uint64(0)
+	if len(samples) > 1 {
+		delta = last - samples[len(samples)-2].dts
+	}
+	return toMs(last + delta)
 }
 
 func (demuxer *MovDemuxer) GetMp4Info() Mp4Info {
@@ -461,13 +491,13 @@ func (demuxer *MovDemuxer) ReadPacket() (*AVPacket, error) {
 			if !ok {
 				return nil, errors.New("mp4: h264 track has no avcC extra data")
 			}
-			avpkg.Data = demuxer.processH264(sample, extra)
+			avpkg.Data = processH264(whichTrack, sample, extra)
 		case MP4_CODEC_H265:
 			extra, ok := whichTrack.extra.(*h265ExtraData)
 			if !ok {
 				return nil, errors.New("mp4: h265 track has no hvcC extra data")
 			}
-			avpkg.Data = demuxer.processH265(sample, extra)
+			avpkg.Data = processH265(whichTrack, sample, extra)
 		case MP4_CODEC_AAC:
 			aacExtra, ok := whichTrack.extra.(*aacExtraData)
 			if !ok {
@@ -517,25 +547,36 @@ func (demuxer *MovDemuxer) GetSyncTable(trackId uint32) ([]SyncSample, error) {
 		syncTable = append(syncTable, SyncSample{
 			Pts:    track.samplelist[idx].pts * 1000 / uint64(track.timescale),
 			Dts:    track.samplelist[idx].dts * 1000 / uint64(track.timescale),
-			Offset: uint32(track.samplelist[idx].offset),
-			Size:   uint32(track.samplelist[idx].size),
+			Offset: track.samplelist[idx].offset,
+			Size:   track.samplelist[idx].size,
 		})
 	}
 	return syncTable, nil
 }
 
+// SeekTime moves every track to the first sample at or after dts (in
+// milliseconds). A video track is rewound further, to the last sync sample at
+// or before that point, so that the frames handed out after a seek are
+// decodable; a track that has no sample that late is positioned at its end.
 func (demuxer *MovDemuxer) SeekTime(dts uint64) error {
 	for i, track := range demuxer.tracks {
 		if track.timescale == 0 {
 			continue
 		}
+		// the parameter sets carried over from before the seek no longer
+		// belong in front of the frames that follow it
+		track.paramSetCache = track.paramSetCache[:0]
+		idx := len(track.samplelist)
 		for j := 0; j < len(track.samplelist); j++ {
-			if track.samplelist[j].dts*1000/uint64(track.timescale) < dts {
-				continue
+			if track.samplelist[j].dts*1000/uint64(track.timescale) >= dts {
+				idx = j
+				break
 			}
-			demuxer.readSampleIdx[i] = uint32(j)
-			break
 		}
+		if isVideo(track.cid) {
+			idx = track.syncSampleAtOrBefore(idx)
+		}
+		demuxer.readSampleIdx[i] = uint32(idx)
 	}
 	return nil
 }
@@ -641,7 +682,11 @@ func (demuxer *MovDemuxer) buildSampleList() error {
 	return nil
 }
 
-func (demuxer *MovDemuxer) processH264(avcc []byte, extra *h264ExtraData) []byte {
+// processH264 turns one avcC sample into Annex-B. Parameter set only samples
+// are held back in track.paramSetCache and prepended to the next key frame,
+// so the cache has to live on the track: two video tracks would otherwise
+// hand each other their parameter sets.
+func processH264(track *mp4track, avcc []byte, extra *h264ExtraData) []byte {
 	idr := false
 	vcl := false
 	spspps := false
@@ -671,23 +716,23 @@ func (demuxer *MovDemuxer) processH264(avcc []byte, extra *h264ExtraData) []byte
 		if !spspps {
 			return avcc
 		} else {
-			demuxer.mp4out = append(demuxer.mp4out, avcc...)
+			track.paramSetCache = append(track.paramSetCache, avcc...)
 		}
 		return nil
 	}
 
 	if spspps {
-		demuxer.mp4out = demuxer.mp4out[:0]
+		track.paramSetCache = track.paramSetCache[:0]
 		return avcc
 	}
 	if !idr {
 		return avcc
 	}
-	if len(demuxer.mp4out) > 0 {
-		out := make([]byte, len(demuxer.mp4out)+len(avcc))
-		copy(out, demuxer.mp4out)
-		copy(out[len(demuxer.mp4out):], avcc)
-		demuxer.mp4out = demuxer.mp4out[:0]
+	if len(track.paramSetCache) > 0 {
+		out := make([]byte, len(track.paramSetCache)+len(avcc))
+		copy(out, track.paramSetCache)
+		copy(out[len(track.paramSetCache):], avcc)
+		track.paramSetCache = track.paramSetCache[:0]
 		return out
 	}
 
@@ -702,7 +747,7 @@ func (demuxer *MovDemuxer) processH264(avcc []byte, extra *h264ExtraData) []byte
 	return out
 }
 
-func (demuxer *MovDemuxer) processH265(hvcc []byte, extra *h265ExtraData) []byte {
+func processH265(track *mp4track, hvcc []byte, extra *h265ExtraData) []byte {
 	idr := false
 	vcl := false
 	spsppsvps := false
@@ -733,23 +778,23 @@ func (demuxer *MovDemuxer) processH265(hvcc []byte, extra *h265ExtraData) []byte
 		if !spsppsvps {
 			return hvcc
 		} else {
-			demuxer.mp4out = append(demuxer.mp4out, hvcc...)
+			track.paramSetCache = append(track.paramSetCache, hvcc...)
 		}
 		return nil
 	}
 
 	if spsppsvps {
-		demuxer.mp4out = demuxer.mp4out[:0]
+		track.paramSetCache = track.paramSetCache[:0]
 		return hvcc
 	}
 	if !idr {
 		return hvcc
 	}
-	if len(demuxer.mp4out) > 0 {
-		out := make([]byte, len(demuxer.mp4out)+len(hvcc))
-		copy(out, demuxer.mp4out)
-		copy(out[len(demuxer.mp4out):], hvcc)
-		demuxer.mp4out = demuxer.mp4out[:0]
+	if len(track.paramSetCache) > 0 {
+		out := make([]byte, len(track.paramSetCache)+len(hvcc))
+		copy(out, track.paramSetCache)
+		copy(out[len(track.paramSetCache):], hvcc)
+		track.paramSetCache = track.paramSetCache[:0]
 		return out
 	}
 

@@ -121,7 +121,7 @@ func TestH264PackerFuADecisionAndSequence(t *testing.T) {
 		t.Fatalf("reassembled nalu mismatch")
 	}
 	// empty nalu must not panic
-	if err := pk.packFuA(nil, 1); err == nil {
+	if err := pk.packFuA(nil, 1, true); err == nil {
 		t.Fatalf("empty nalu should error")
 	}
 }

@@ -2,6 +2,7 @@ package sdp
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -142,5 +143,52 @@ func TestParserSdpRejectsSessionLevelRtpmap(t *testing.T) {
 	var s4 Sdp
 	if err := s4.ParserSdp("v=0\r\nm=audio 0 RTP/AVP 97\r\na=rtpmap:97 MPEG4-GENERIC/16000/x\r\n"); err == nil {
 		t.Fatalf("illegal channel count must be reported")
+	}
+}
+
+// rfc4566 defines "c=" as three fields. An encoder that leaves the address
+// empty writes a line every parser rejects, and a description that cannot be
+// parsed is a publish that never starts.
+func TestEncodeConnectionAddressIsNeverEmpty(t *testing.T) {
+	s := &Sdp{Attrs: map[string]string{"control": "*"}}
+	out := s.Encode()
+
+	var connection string
+	for _, line := range strings.Split(out, "\r\n") {
+		if strings.HasPrefix(line, "c=") {
+			connection = line
+		}
+	}
+	if connection == "" {
+		t.Fatalf("no connection line in:\n%s", out)
+	}
+	fields := strings.Fields(strings.TrimPrefix(connection, "c="))
+	if len(fields) != 3 {
+		t.Fatalf("connection line %q has %d fields, want 3", connection, len(fields))
+	}
+
+	// and it has to survive a round trip through the parser
+	back := &Sdp{}
+	if err := back.ParserSdp(out); err != nil {
+		t.Fatalf("the encoder produced a description it cannot parse: %v\n%s", err, out)
+	}
+	if back.ConnectionData.Address != "0.0.0.0" {
+		t.Errorf("connection address came back as %q, want 0.0.0.0", back.ConnectionData.Address)
+	}
+}
+
+// A caller that sets the connection data or the session name has to see it
+// in the output rather than the hardcoded default.
+func TestEncodeUsesTheSessionItWasGiven(t *testing.T) {
+	s := &Sdp{
+		SessionName:    "camera 3",
+		ConnectionData: Connection{Nettype: "IN", Addrtype: "IP4", Address: "192.0.2.10"},
+	}
+	out := s.Encode()
+	if !strings.Contains(out, "s=camera 3\r\n") {
+		t.Errorf("session name was dropped:\n%s", out)
+	}
+	if !strings.Contains(out, "c=IN IP4 192.0.2.10\r\n") {
+		t.Errorf("connection data was dropped:\n%s", out)
 	}
 }

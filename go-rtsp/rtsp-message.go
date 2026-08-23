@@ -291,8 +291,16 @@ func makePause(uri string, cseq int32) RtspRequest {
 	return makeCommonReq(PAUSE, uri, cseq)
 }
 
+// makeAnnounce builds the request that publishes a session description.
+//
+// ANNOUNCE always carries a body, and rfc2326 12.16 makes Content-Type
+// mandatory for any request that has one. Servers enforce it: gortsplib, and
+// so mediamtx, answers 400 Bad Request to an announce without it, so leaving
+// it out means never being able to publish at all.
 func makeAnnounce(uri string, cseq int32) RtspRequest {
-	return makeCommonReq(ANNOUNCE, uri, cseq)
+	req := makeCommonReq(ANNOUNCE, uri, cseq)
+	req.Fileds[ContentType] = "application/sdp"
+	return req
 }
 
 func makeRecord(uri string, cseq int32) RtspRequest {

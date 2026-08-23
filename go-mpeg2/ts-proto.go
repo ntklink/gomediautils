@@ -17,7 +17,7 @@ const (
 	TS_PID_CAT
 	TS_PID_TSDT
 	TS_PID_IPMP
-	TS_PID_Nil = 0x1FFF
+	TS_PID_Nil TS_PID = 0x1FFF
 )
 
 // Table id
@@ -25,9 +25,9 @@ type PAT_TID int
 
 const (
 	TS_TID_PAS       PAT_TID = 0x00 // program_association_section
-	TS_TID_CAS               = 0x01 // conditional_access_section(CA_section)
-	TS_TID_PMS               = 0x02 // TS_program_map_section
-	TS_TID_SDS               = 0x03 //TS_description_section
+	TS_TID_CAS       PAT_TID = 0x01 // conditional_access_section(CA_section)
+	TS_TID_PMS       PAT_TID = 0x02 // TS_program_map_section
+	TS_TID_SDS       PAT_TID = 0x03 //TS_description_section
 	TS_TID_FORBIDDEN PAT_TID = 0xFF
 )
 
@@ -119,7 +119,7 @@ func (pkg *TSPacket) DecodeHeader(bs *codec.BitStream) error {
 	if err := bs.Err(); err != nil {
 		return err
 	}
-	if pkg.PID == TS_PID_Nil {
+	if pkg.PID == uint16(TS_PID_Nil) {
 		return nil
 	}
 	if pkg.Adaptation_field_control == 0x02 || pkg.Adaptation_field_control == 0x03 {

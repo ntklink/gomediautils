@@ -11,7 +11,7 @@ import (
 // errShortSPS is reported when an SPS is too short to build an
 // AVCDecoderConfigurationRecord from (it needs the nal header plus the
 // profile, compatibility and level bytes).
-var errShortSPS = errors.New("flv: h264 sps shorter than 4 bytes")
+var errShortSPS = codec.ErrShortSPS
 
 func WriteAudioTag(data []byte, cid FLV_SOUND_FORMAT, sampleRate int, channelCount int, isSequenceHeader bool) []byte {
 	var atag AudioTag
@@ -62,12 +62,25 @@ func WriteVideoTag(data []byte, isKey bool, cid FLV_VIDEO_CODEC_ID, cts int32, i
 	} else {
 		vtag.FrameType = uint8(INTER_FRAME)
 	}
-	if isSequenceHeader {
-		vtag.AVCPacketType = uint8(AVC_SEQUENCE_HEADER)
+
+	var hdr []byte
+	if cid == FLV_HEVC {
+		// hevc has no legacy codec id, so it goes out as an enhanced tag
+		if isSequenceHeader {
+			vtag.AVCPacketType = PacketTypeSequenceStart
+		} else {
+			vtag.AVCPacketType = PacketTypeCodedFrames
+		}
+		hdr = vtag.EncodeEx(hevcFourCC)
 	} else {
-		vtag.AVCPacketType = uint8(AVC_NALU)
+		if isSequenceHeader {
+			vtag.AVCPacketType = uint8(AVC_SEQUENCE_HEADER)
+		} else {
+			vtag.AVCPacketType = uint8(AVC_NALU)
+		}
+		hdr = vtag.Encode()
 	}
-	hdr := vtag.Encode()
+
 	tagData := make([]byte, 0, len(hdr)+len(data))
 	tagData = append(tagData, hdr...)
 	tagData = append(tagData, data...)

@@ -110,7 +110,7 @@ type VideoTag struct {
 }
 
 func (vtag VideoTag) Encode() (tag []byte) {
-	if vtag.CodecId == uint8(FLV_AVC) || vtag.CodecId == uint8(FLV_HEVC) {
+	if vtag.CodecId == uint8(FLV_AVC) {
 		tag = make([]byte, 5)
 		tag[1] = vtag.AVCPacketType
 		PutUint24(tag[2:], uint32(vtag.CompositionTime))
@@ -121,15 +121,60 @@ func (vtag VideoTag) Encode() (tag []byte) {
 	return
 }
 
+// hevcFourCC identifies hevc in an enhanced video tag header.
+var hevcFourCC = [4]byte{'h', 'v', 'c', '1'}
+
+// EncodeEx writes an enhanced (enhanced-rtmp) video tag header.
+//
+// The legacy header has no room for a codec beyond the four bit CodecId, and
+// the value 12 that hevc is often written as is a vendor extension no
+// standard player implements. Enhanced headers carry a FourCC instead, which
+// is what ffmpeg, OBS and browsers read, and is the form this package's
+// demuxer already accepts.
+//
+//	byte 0: 1 | FrameType(3) | PacketType(4)
+//	byte 1..4: FourCC
+//	byte 5..7: composition time, only for PacketTypeCodedFrames
+func (vtag VideoTag) EncodeEx(fourCC [4]byte) (tag []byte) {
+	size := 5
+	if vtag.AVCPacketType == PacketTypeCodedFrames {
+		size = 8
+	}
+	tag = make([]byte, size)
+	tag[0] = 0x80 | ((vtag.FrameType & 0x07) << 4) | (vtag.AVCPacketType & 0x0F)
+	copy(tag[1:5], fourCC[:])
+	if size == 8 {
+		PutUint24(tag[5:], uint32(vtag.CompositionTime))
+	}
+	return
+}
+
 // Decode reads a video tag header. Every field is only read when data is long
 // enough to hold it, so a truncated tag leaves the remaining fields zero
 // instead of reading past the end of the buffer.
 func (vtag *VideoTag) Decode(data []byte) {
-	if len(data) < 5 {
+	if len(data) < 1 {
 		return
 	}
 	isExHeader := data[0] & 0x80
-	if isExHeader != 0 {
+	if isExHeader == 0 {
+		// legacy header: codecs other than AVC/HEVC carry no further fields,
+		// so a one byte tag is complete
+		vtag.FrameType = data[0] >> 4
+		vtag.CodecId = data[0] & 0x0F
+		if vtag.CodecId == uint8(FLV_AVC) || vtag.CodecId == uint8(FLV_HEVC) {
+			if len(data) < 5 {
+				return
+			}
+			vtag.AVCPacketType = data[1]
+			vtag.CompositionTime = GetInt24(data[2:])
+		}
+		return
+	}
+	if len(data) < 5 {
+		return
+	}
+	{
 		// enhanced flv
 		vtag.FrameType = (data[0] >> 4) & 0x07
 		vtag.AVCPacketType = data[0] & 0x0F
@@ -140,15 +185,8 @@ func (vtag *VideoTag) Decode(data []byte) {
 			vtag.CodecId = uint8(FLV_HEVC)
 
 			if vtag.AVCPacketType == PacketTypeCodedFrames && len(data) >= 8 {
-				vtag.CompositionTime = int32(GetUint24(data[5:]))
+				vtag.CompositionTime = GetInt24(data[5:])
 			}
-		}
-	} else {
-		vtag.FrameType = data[0] >> 4
-		vtag.CodecId = data[0] & 0x0F
-		if vtag.CodecId == uint8(FLV_AVC) || vtag.CodecId == uint8(FLV_HEVC) {
-			vtag.AVCPacketType = data[1]
-			vtag.CompositionTime = int32(GetUint24(data[2:]))
 		}
 	}
 }

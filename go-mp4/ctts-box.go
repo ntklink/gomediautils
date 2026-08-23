@@ -92,6 +92,7 @@ func (ctts *CompositionOffsetBox) Encode() (int, []byte) {
 
 func makeCtts(ctts *movctts) (boxdata []byte) {
 	cttsbox := NewCompositionOffsetBox()
+	cttsbox.box.Version = ctts.version
 	cttsbox.ctts = ctts
 	_, boxdata = cttsbox.Encode()
 	return

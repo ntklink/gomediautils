@@ -31,13 +31,14 @@ type ChannelMappingTable struct {
 }
 
 type OpusSpecificBox struct {
-	Box                *BasicBox
-	Version            uint8
-	OutputChannelCount uint8
-	PreSkip            uint16
-	InputSampleRate    uint32
-	OutputGain         int16
-	ChanMapTable       *ChannelMappingTable
+	Box                  *BasicBox
+	Version              uint8
+	OutputChannelCount   uint8
+	PreSkip              uint16
+	InputSampleRate      uint32
+	OutputGain           int16
+	ChannelMappingFamily uint8
+	ChanMapTable         *ChannelMappingTable
 }
 
 func NewdOpsBox() *OpusSpecificBox {
@@ -46,10 +47,23 @@ func NewdOpsBox() *OpusSpecificBox {
 	}
 }
 
+// dOpsFixedLen is Version, OutputChannelCount, PreSkip, InputSampleRate,
+// OutputGain and ChannelMappingFamily.
+const dOpsFixedLen = 1 + 1 + 2 + 4 + 2 + 1
+
 func (dops *OpusSpecificBox) Size() uint64 {
-	return uint64(8 + 10 + 2 + dops.OutputChannelCount)
+	size := uint64(BasicBoxLen + dOpsFixedLen)
+	if dops.ChanMapTable != nil {
+		size += 2 + uint64(len(dops.ChanMapTable.ChannelMapping))
+	}
+	return size
 }
 
+// Encode writes the box. Every multi byte field of dOps is big endian, unlike
+// the little endian OpusHead the values usually come from: writing PreSkip in
+// the source byte order turns the 312 sample priming of a typical encoder
+// into 14337, and a decoder then throws away the first third of a second of
+// audio.
 func (dops *OpusSpecificBox) Encode() (int, []byte) {
 	dops.Box.Size = dops.Size()
 	offset, buf := dops.Box.Encode()
@@ -57,12 +71,14 @@ func (dops *OpusSpecificBox) Encode() (int, []byte) {
 	offset++
 	buf[offset] = dops.OutputChannelCount
 	offset++
-	binary.LittleEndian.PutUint16(buf[offset:], dops.PreSkip)
+	binary.BigEndian.PutUint16(buf[offset:], dops.PreSkip)
 	offset += 2
 	binary.BigEndian.PutUint32(buf[offset:], dops.InputSampleRate)
 	offset += 4
-	binary.LittleEndian.PutUint16(buf[offset:], uint16(dops.OutputGain))
+	binary.BigEndian.PutUint16(buf[offset:], uint16(dops.OutputGain))
 	offset += 2
+	buf[offset] = dops.ChannelMappingFamily
+	offset++
 	if dops.ChanMapTable != nil {
 		buf[offset] = dops.ChanMapTable.StreamCount
 		offset++
@@ -80,12 +96,8 @@ func (dops *OpusSpecificBox) Decode(r io.Reader, size uint32) (offset int, err e
 	if err != nil {
 		return
 	}
-	if err = checkRemain(dopsBuf, 0, 10); err != nil {
+	if err = checkRemain(dopsBuf, 0, dOpsFixedLen); err != nil {
 		return
-	}
-	ChannelMappingFamily := 0
-	if len(dopsBuf) > 12 {
-		ChannelMappingFamily = len(dopsBuf) - 10
 	}
 
 	dops.Version = dopsBuf[0]
@@ -93,13 +105,20 @@ func (dops *OpusSpecificBox) Decode(r io.Reader, size uint32) (offset int, err e
 	dops.PreSkip = binary.BigEndian.Uint16(dopsBuf[2:])
 	dops.InputSampleRate = binary.BigEndian.Uint32(dopsBuf[4:])
 	dops.OutputGain = int16(binary.BigEndian.Uint16(dopsBuf[8:]))
+	dops.ChannelMappingFamily = dopsBuf[10]
 	dops.ChanMapTable = nil
-	if ChannelMappingFamily > 0 {
-		dops.ChanMapTable = &ChannelMappingTable{}
-		dops.ChanMapTable.StreamCount = dopsBuf[10]
-		dops.ChanMapTable.CoupledCount = dopsBuf[11]
-		dops.ChanMapTable.ChannelMapping = make([]byte, ChannelMappingFamily-2)
-		copy(dops.ChanMapTable.ChannelMapping, dopsBuf[12:])
+	if dops.ChannelMappingFamily != 0 {
+		// the mapping table holds one byte per output channel
+		need := dOpsFixedLen + 2 + int(dops.OutputChannelCount)
+		if err = checkRemain(dopsBuf, 0, need); err != nil {
+			return
+		}
+		dops.ChanMapTable = &ChannelMappingTable{
+			StreamCount:    dopsBuf[11],
+			CoupledCount:   dopsBuf[12],
+			ChannelMapping: make([]byte, dops.OutputChannelCount),
+		}
+		copy(dops.ChanMapTable.ChannelMapping, dopsBuf[13:])
 	}
 
 	return int(size - BasicBoxLen), nil
@@ -107,13 +126,19 @@ func (dops *OpusSpecificBox) Decode(r io.Reader, size uint32) (offset int, err e
 
 func makeOpusSpecificBox(extraData []byte) []byte {
 	ctx := &codec.OpusContext{}
-	ctx.ParseExtranData(extraData)
+	if err := ctx.ParseExtranData(extraData); err != nil {
+		// nothing describable: an empty box is still better than one built
+		// from a half parsed header
+		_, boxdata := NewdOpsBox().Encode()
+		return boxdata
+	}
 	dops := NewdOpsBox()
 	dops.Version = 0
 	dops.OutputChannelCount = uint8(ctx.ChannelCount)
 	dops.PreSkip = uint16(ctx.Preskip)
 	dops.InputSampleRate = uint32(ctx.SampleRate)
 	dops.OutputGain = int16(ctx.OutputGain)
+	dops.ChannelMappingFamily = ctx.MapType
 	if ctx.MapType > 0 {
 		dops.ChanMapTable = &ChannelMappingTable{
 			StreamCount:    uint8(ctx.StreamCount),

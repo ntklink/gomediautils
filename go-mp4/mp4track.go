@@ -44,13 +44,7 @@ type h264ExtraData struct {
 }
 
 func (extra *h264ExtraData) export() ([]byte, error) {
-	// CreateH264AVCCExtradata rewrites the slice it is handed, stripping the
-	// start codes in place, so give it a copy and keep our own nalus intact
-	spss := make([][]byte, len(extra.spss))
-	copy(spss, extra.spss)
-	ppss := make([][]byte, len(extra.ppss))
-	copy(ppss, extra.ppss)
-	return codec.CreateH264AVCCExtradata(spss, ppss)
+	return codec.CreateH264AVCCExtradata(extra.spss, extra.ppss)
 }
 
 func (extra *h264ExtraData) load(data []byte) error {
@@ -126,6 +120,9 @@ type mp4track struct {
 	lastSample  *sampleCache
 	writer      io.WriteSeeker
 	fragments   []movFragment
+	// paramSetCache holds sps/pps/vps seen in a sample that carried no slice,
+	// so they can be prepended to the next key frame while demuxing
+	paramSetCache []byte
 
 	//for fmp4
 	extraData          []byte
@@ -173,11 +170,14 @@ func newmp4track(cid MP4_CODEC_TYPE, writer io.WriteSeeker) *mp4track {
 	return track
 }
 
+// addSampleEntry appends a sample and keeps track.duration in step with it.
+// duration is the span from the first sample of the current run to this one,
+// so every interval including the very first has to be accumulated.
 func (track *mp4track) addSampleEntry(entry sampleEntry) {
-	if len(track.samplelist) <= 1 {
+	if len(track.samplelist) == 0 {
 		track.duration = 0
 	} else {
-		delta := int64(entry.dts - track.samplelist[len(track.samplelist)-1].dts)
+		delta := int64(entry.dts) - int64(track.samplelist[len(track.samplelist)-1].dts)
 		if delta < 0 {
 			track.duration += 1
 		} else {
@@ -188,6 +188,10 @@ func (track *mp4track) addSampleEntry(entry sampleEntry) {
 }
 
 func (track *mp4track) makeStblTable() {
+	if len(track.samplelist) == 0 {
+		track.makeEmptyStblTable()
+		return
+	}
 	if track.stbltable == nil {
 		track.stbltable = new(movstbl)
 	}
@@ -199,8 +203,14 @@ func (track *mp4track) makeStblTable() {
 	ctts.entrys = make([]cttsEntry, 0)
 	ckn := uint32(0)
 	for i, sample := range track.samplelist {
-		sttsEntry := sttsEntry{sampleCount: 1, sampleDelta: 1}
-		cttsEntry := cttsEntry{sampleCount: 1, sampleOffset: uint32(sample.pts) - uint32(sample.dts)}
+		sttsEntry := sttsEntry{sampleCount: 1, sampleDelta: track.lastSampleDelta()}
+		// the composition offset is signed; a stream whose pts is reordered
+		// ahead of its dts needs the version 1 box to express it
+		offset := int64(sample.pts) - int64(sample.dts)
+		if offset < 0 {
+			ctts.version = 1
+		}
+		cttsEntry := cttsEntry{sampleCount: 1, sampleOffset: uint32(int32(offset))}
 		if i == len(track.samplelist)-1 {
 			stts.entrys = append(stts.entrys, sttsEntry)
 			stts.entryCount++
@@ -244,6 +254,12 @@ func (track *mp4track) makeStblTable() {
 	stsz := &movstsz{
 		sampleSize:  0,
 		sampleCount: uint32(len(track.samplelist)),
+	}
+	// sample_size == 0 is the sentinel that says the per sample sizes follow
+	// in a table, so a run of samples that are all zero bytes long cannot use
+	// the uniform form
+	if sameSize && track.samplelist[0].size == 0 {
+		sameSize = false
 	}
 	if sameSize {
 		stsz.sampleSize = uint32(track.samplelist[0].size)
@@ -488,27 +504,32 @@ func (track *mp4track) writeAAC(aacframes []byte, pts, dts uint64) (err error) {
 	if currentOffset, err = track.writer.Seek(0, io.SeekCurrent); err != nil {
 		return
 	}
-	//某些情况下，aacframes 可能由多个aac帧组成需要分帧，否则quicktime 貌似播放有问题
+	// aacframes may hold several aac frames: a ts or ps demuxer hands over a
+	// whole PES payload, which usually carries a handful of them under one
+	// timestamp. mp4 needs one sample per frame, each with its own decode
+	// time, so the timestamp is advanced by the duration of a frame. Giving
+	// them all the same timestamp produces a file whose audio dts does not
+	// increase, which players reject.
 	var writeErr error
+	frameIndex := 0
 	splitErr := codec.SplitAACFrame(aacframes, func(aac []byte) {
 		if writeErr != nil {
 			return
 		}
-		entry := sampleEntry{
-			pts:                    pts,
-			dts:                    dts,
-			size:                   0,
-			SampleDescriptionIndex: 1,
-			offset:                 uint64(currentOffset),
-		}
+		offsetMs := track.aacFrameOffsetMs(frameIndex)
+		frameIndex++
 		n := 0
-		n, writeErr = track.writer.Write(aac[7:])
-		if writeErr != nil {
+		if n, writeErr = track.writer.Write(aac[7:]); writeErr != nil {
 			return
 		}
+		track.addSampleEntry(sampleEntry{
+			pts:                    pts + offsetMs,
+			dts:                    dts + offsetMs,
+			size:                   uint64(n),
+			SampleDescriptionIndex: 1,
+			offset:                 uint64(currentOffset),
+		})
 		currentOffset += int64(n)
-		entry.size = uint64(n)
-		track.addSampleEntry(entry)
 	})
 	if writeErr != nil {
 		return writeErr
@@ -516,23 +537,41 @@ func (track *mp4track) writeAAC(aacframes []byte, pts, dts uint64) (err error) {
 	return splitErr
 }
 
+// aacSamplesPerFrame is the number of samples an aac frame decodes to. Only
+// the 1024 sample variants are muxed here.
+const aacSamplesPerFrame = 1024
+
+// aacFrameOffsetMs is how far frame i of a multi frame aac payload sits after
+// the first one. It is computed from the index rather than accumulated so
+// that millisecond rounding does not drift over a long file.
+func (track *mp4track) aacFrameOffsetMs(i int) uint64 {
+	if i == 0 || track.sampleRate == 0 {
+		return 0
+	}
+	return uint64(i) * aacSamplesPerFrame * 1000 / uint64(track.sampleRate)
+}
+
 func (track *mp4track) writeG711(g711 []byte, pts, dts uint64) (err error) {
+	if len(g711) == 0 {
+		// a zero byte sample carries nothing and cannot be described by stsz
+		return nil
+	}
 	var currentOffset int64
 	if currentOffset, err = track.writer.Seek(0, io.SeekCurrent); err != nil {
 		return
 	}
-	entry := sampleEntry{
+	n := 0
+	if n, err = track.writer.Write(g711); err != nil {
+		return err
+	}
+	track.addSampleEntry(sampleEntry{
 		pts:                    pts,
 		dts:                    dts,
-		size:                   0,
+		size:                   uint64(n),
 		SampleDescriptionIndex: 1,
 		offset:                 uint64(currentOffset),
-	}
-	n := 0
-	n, err = track.writer.Write(g711)
-	entry.size = uint64(n)
-	track.addSampleEntry(entry)
-	return
+	})
+	return nil
 }
 
 func (track *mp4track) writeMP3(mp3 []byte, pts, dts uint64) (err error) {
@@ -558,9 +597,9 @@ func (track *mp4track) writeOPUS(opus []byte, pts, dts uint64) (err error) {
 		opusPacket := codec.DecodeOpusPacket(opus)
 		track.sampleRate = 48000 // TODO: fixed?
 		if opusPacket.Stereo != 0 {
-			track.chanelCount = 1
-		} else {
 			track.chanelCount = 2
+		} else {
+			track.chanelCount = 1
 		}
 		track.sampleBits = 16 // TODO: fixed
 	}
@@ -595,6 +634,55 @@ func (track *mp4track) flush() (err error) {
 		track.lastSample.pts = 0
 	}
 	return nil
+}
+
+// lastSampleDelta is the duration to give the final sample, which has no
+// successor to measure against. The one before it is the best estimate; a
+// single tick, which is what a placeholder would give, makes the track end
+// one frame early and players drop that frame.
+func (track *mp4track) lastSampleDelta() uint32 {
+	n := len(track.samplelist)
+	if n < 2 {
+		return 1
+	}
+	delta := int64(track.samplelist[n-1].dts) - int64(track.samplelist[n-2].dts)
+	if delta <= 0 {
+		return 1
+	}
+	return uint32(delta)
+}
+
+// mediaDuration is the whole length of the track in media timescale units:
+// the span between the first and last decode time plus the duration of the
+// last sample. track.duration only covers the span, so using it as the
+// duration of the media cuts the last sample off.
+func (track *mp4track) mediaDuration() uint32 {
+	if len(track.samplelist) == 0 {
+		return track.duration
+	}
+	return track.duration + track.lastSampleDelta()
+}
+
+// syncSampleAtOrBefore returns the index of the last sync sample at or before
+// idx. Without a stss box every sample is a sync sample, so idx is returned
+// unchanged.
+func (track *mp4track) syncSampleAtOrBefore(idx int) int {
+	if track.stbltable == nil || track.stbltable.stss == nil || len(track.stbltable.stss.sampleNumber) == 0 {
+		return idx
+	}
+	best := -1
+	for _, num := range track.stbltable.stss.sampleNumber {
+		if num == 0 {
+			continue
+		}
+		if int(num-1) <= idx && int(num-1) > best {
+			best = int(num - 1)
+		}
+	}
+	if best < 0 {
+		return idx
+	}
+	return best
 }
 
 func (track *mp4track) clearSamples() {

@@ -51,7 +51,10 @@ type RtmpClient struct {
 	lastMethod     RtmpConnectCmd
 	lastMethodTid  int
 	tid            uint32
-	streamId       uint32
+	// streamId is assigned while handling the createStream result on the
+	// Input goroutine and read by the Write* methods, which the api invites
+	// callers to drive from a second goroutine
+	streamId       uint32 // accessed atomically
 	writeChunkSize uint32
 	isPublish      bool
 }
@@ -306,7 +309,7 @@ func (cli *RtmpClient) WriteVideoTag(tag []byte, dts uint32) error {
 		cli.videoChan = newChunkStreamWriter(CHUNK_CHANNEL_VIDEO)
 		cli.videoChan.chunkSize = cli.writeChunkSize
 	}
-	return cli.sendBatch(new(chunkBatch).write(cli.videoChan, tag, nil, VIDEO, cli.streamId, dts))
+	return cli.sendBatch(new(chunkBatch).write(cli.videoChan, tag, nil, VIDEO, atomic.LoadUint32(&cli.streamId), dts))
 }
 
 // WriteAudioTag sends an already encoded flv audio tag body (AudioTag header + payload)
@@ -315,7 +318,7 @@ func (cli *RtmpClient) WriteAudioTag(tag []byte, dts uint32) error {
 		cli.audioChan = newChunkStreamWriter(CHUNK_CHANNEL_AUDIO)
 		cli.audioChan.chunkSize = cli.writeChunkSize
 	}
-	return cli.sendBatch(new(chunkBatch).write(cli.audioChan, tag, nil, AUDIO, cli.streamId, dts))
+	return cli.sendBatch(new(chunkBatch).write(cli.audioChan, tag, nil, AUDIO, atomic.LoadUint32(&cli.streamId), dts))
 }
 
 // WriteSetDataFrame sends @setDataFrame onMetaData, call after STATE_RTMP_PUBLISH_START
@@ -330,7 +333,7 @@ func (cli *RtmpClient) WriteSetDataFrame(values map[string]interface{}) error {
 	}
 	data := flv.EncodeAmf0String(nil, "@setDataFrame")
 	data = append(data, meta...)
-	return cli.sendBatch(new(chunkBatch).write(cli.metaChan, data, nil, Metadata_AMF0, cli.streamId, 0))
+	return cli.sendBatch(new(chunkBatch).write(cli.metaChan, data, nil, Metadata_AMF0, atomic.LoadUint32(&cli.streamId), 0))
 }
 
 func (cli *RtmpClient) changeState(newState RtmpState) {
@@ -527,7 +530,7 @@ func (cli *RtmpClient) handleCreateStreamResponse(data []byte) error {
 			}
 		}
 		if sid, ok := items[len(items)-1].value.(float64); ok {
-			cli.streamId = uint32(sid)
+			atomic.StoreUint32(&cli.streamId, uint32(sid))
 		}
 	}
 
@@ -536,14 +539,14 @@ func (cli *RtmpClient) handleCreateStreamResponse(data []byte) error {
 		cli.lastMethod = GET_STREAM_LENGTH
 		cli.lastMethodTid = 3
 		cmd, err := makeGetStreamLength(3, cli.streamName)
-		batch.write(cli.cmdChan, cmd, err, Command_AMF0, cli.streamId, 0)
+		batch.write(cli.cmdChan, cmd, err, Command_AMF0, atomic.LoadUint32(&cli.streamId), 0)
 		req, err := makePlay(int(cli.tid), cli.streamName, -1, -1, true)
-		batch.write(cli.sourceChan, req, err, Command_AMF0, cli.streamId, 0)
+		batch.write(cli.sourceChan, req, err, Command_AMF0, atomic.LoadUint32(&cli.streamId), 0)
 		return cli.sendBatch(batch)
 	}
 
 	pub, err := makePublish(cli.streamName, PUBLISHING_LIVE)
-	batch.write(cli.cmdChan, pub, err, Command_AMF0, cli.streamId, 0)
+	batch.write(cli.cmdChan, pub, err, Command_AMF0, atomic.LoadUint32(&cli.streamId), 0)
 	return cli.sendBatch(batch)
 }
 

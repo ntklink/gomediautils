@@ -38,10 +38,13 @@ type Demuxer struct {
 	headCache     []byte
 	OnPage        func(page *oggPage)
 	OnPacket      func(streamId uint32, granule uint64, packet []byte, lost int)
-	OnFrame       func(streamId uint32, cid codec.CodecID, frame []byte, pts uint64, dts uint64, lost int)
-	state         DemuxState
-	vparam        *VideoParam
-	aparam        *AudioParam
+	// OnFrame reports one media frame. pts and dts are in milliseconds, the
+	// unit every demuxer in this module reports and every muxer takes, not
+	// the codec's own clock.
+	OnFrame func(streamId uint32, cid codec.CodecID, frame []byte, pts uint64, dts uint64, lost int)
+	state   DemuxState
+	vparam  *VideoParam
+	aparam  *AudioParam
 }
 
 func NewDemuxer() *Demuxer {
@@ -256,9 +259,21 @@ func (demuxer *Demuxer) readPacket(stream *oggStream, packet []byte) error {
 		return err
 	}
 	if demuxer.OnFrame != nil {
-		demuxer.OnFrame(stream.streamId, stream.cid, frame, pts, dts, stream.lost)
+		rate := stream.parser.clockRate()
+		demuxer.OnFrame(stream.streamId, stream.cid, frame,
+			toMilliseconds(pts, rate), toMilliseconds(dts, rate), stream.lost)
 	}
 	return nil
+}
+
+// toMilliseconds converts a timestamp from the codec's clock. A parser that
+// does not know its clock yet leaves the value alone rather than dividing by
+// zero.
+func toMilliseconds(ts uint64, clockRate uint64) uint64 {
+	if clockRate == 0 {
+		return ts
+	}
+	return ts * 1000 / clockRate
 }
 
 // updateParam publishes the stream parameters as soon as the codec header of

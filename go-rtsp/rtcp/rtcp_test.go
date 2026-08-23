@@ -2,7 +2,10 @@ package rtcp
 
 import (
 	"bytes"
+	"sync"
 	"testing"
+
+	"github.com/yapingcat/gomedia/go-rtsp/rtp"
 )
 
 func TestCommDecodeShort(t *testing.T) {
@@ -132,4 +135,59 @@ func TestFractionLostClamped(t *testing.T) {
 	if rb.Fraction != 0 {
 		t.Fatalf("fraction should clamp to 0, got %d", rb.Fraction)
 	}
+}
+
+// The rtp send path and the rtcp report timer are always different
+// goroutines: an interval report is generated on a clock of its own while
+// packets keep going out. Nothing a caller can do makes that not concurrent,
+// so the context has to hold up under it on its own.
+func TestRtcpContextIsConcurrencySafe(t *testing.T) {
+	ctx := NewRtcpContext(0x11223344, 1000, 90000)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for seq := uint16(1000); ; seq++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			ctx.SendRtp(&rtp.RtpPacket{
+				Header:  rtp.RtpHdr{SequenceNumber: seq, Timestamp: uint32(seq) * 3600},
+				Payload: make([]byte, 100),
+			})
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for seq := uint16(2000); ; seq++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			ctx.ReceivedRtp(&rtp.RtpPacket{
+				Header:  rtp.RtpHdr{SequenceNumber: seq, Timestamp: uint32(seq) * 3600},
+				Payload: make([]byte, 100),
+			})
+		}
+	}()
+
+	for i := 0; i < 2000; i++ {
+		if sr := ctx.GenerateSR(); sr == nil {
+			t.Fatal("GenerateSR returned nothing")
+		}
+		if rr := ctx.GenerateRR(); rr == nil {
+			t.Fatal("GenerateRR returned nothing")
+		}
+		ctx.ReceivedSR(&SenderReport{SSRC: 0x55667788, NTP: uint64(i)})
+	}
+	close(stop)
+	wg.Wait()
 }

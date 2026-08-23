@@ -137,15 +137,18 @@ func (producer *MediaProducer) removeConsumer(id string) {
 }
 
 type MediaSession struct {
-	handle    *rtmp.RtmpServerHandle
-	conn      net.Conn
-	lists     []*MediaFrame
+	handle *rtmp.RtmpServerHandle
+	conn   net.Conn
+	id     string
+	// The session is set up on the goroutine that reads its connection, and
+	// read from the producer's dispatch goroutine, so everything both of
+	// them touch is guarded.
 	mtx       sync.Mutex
-	id        string
+	lists     []*MediaFrame
 	isReady   bool
+	source    *MediaProducer
 	frameCome chan struct{}
 	quit      chan struct{}
-	source    *MediaProducer
 	die       sync.Once
 	C         chan *MediaFrame
 }
@@ -185,11 +188,11 @@ func (sess *MediaSession) init() {
 			fmt.Println("play start")
 			name := sess.handle.GetStreamName()
 			source := center.find(name)
-			sess.source = source
+			sess.setSource(source)
 			if source != nil {
 				source.addConsumer(sess)
 				fmt.Println("ready to play")
-				sess.isReady = true
+				sess.setReady()
 				go sess.sendToClient()
 			}
 		} else if newState == rtmp.STATE_RTMP_PUBLISH_START {
@@ -232,16 +235,39 @@ func (sess *MediaSession) start() {
 func (sess *MediaSession) stop() {
 	sess.die.Do(func() {
 		close(sess.quit)
-		if sess.source != nil {
-			sess.source.removeConsumer(sess.id)
-			sess.source = nil
+		if source := sess.takeSource(); source != nil {
+			source.removeConsumer(sess.id)
 		}
 		sess.conn.Close()
 	})
 }
 
 func (sess *MediaSession) ready() bool {
+	sess.mtx.Lock()
+	defer sess.mtx.Unlock()
 	return sess.isReady
+}
+
+func (sess *MediaSession) setReady() {
+	sess.mtx.Lock()
+	sess.isReady = true
+	sess.mtx.Unlock()
+}
+
+func (sess *MediaSession) setSource(source *MediaProducer) {
+	sess.mtx.Lock()
+	sess.source = source
+	sess.mtx.Unlock()
+}
+
+// takeSource hands the source over and forgets it, so the caller is the only
+// one that can unregister from it.
+func (sess *MediaSession) takeSource() *MediaProducer {
+	sess.mtx.Lock()
+	defer sess.mtx.Unlock()
+	source := sess.source
+	sess.source = nil
+	return source
 }
 
 func (sess *MediaSession) play(frame *MediaFrame) {
@@ -285,11 +311,24 @@ func (sess *MediaSession) sendToClient() {
 	}
 }
 
-func startRtmpServer() {
-	addr := "0.0.0.0:" + *port
-	listen, _ := net.Listen("tcp4", addr)
+// Listen starts the relay on addr and returns the listener, so a caller can
+// ask for an ephemeral port ("127.0.0.1:0") and shut the server down again.
+// Serving runs in the background until the listener is closed.
+func Listen(addr string) (net.Listener, error) {
+	listen, err := net.Listen("tcp4", addr)
+	if err != nil {
+		return nil, err
+	}
+	go serve(listen)
+	return listen, nil
+}
+
+func serve(listen net.Listener) {
 	for {
-		conn, _ := listen.Accept()
+		conn, err := listen.Accept()
+		if err != nil {
+			return
+		}
 		sess := newMediaSession(conn)
 		sess.init()
 		go sess.start()
@@ -298,6 +337,11 @@ func startRtmpServer() {
 
 func main() {
 	flag.Parse()
-	go startRtmpServer()
+	listen, err := Listen("0.0.0.0:" + *port)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer listen.Close()
 	select {}
 }

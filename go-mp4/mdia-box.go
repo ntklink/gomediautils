@@ -5,7 +5,7 @@ func makeMdiaBox(track *mp4track) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	mdhdbox := makeMdhdBox(track.duration)
+	mdhdbox := makeMdhdBox(track.mediaDuration())
 	hdlrbox := makeHdlrBox(handlerType)
 	minfbox, err := makeMinfBox(track)
 	if err != nil {

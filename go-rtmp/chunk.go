@@ -14,6 +14,21 @@ const maxRtmpMessageLen = 0x00ffffff
 // the 3 byte basic header can describe chunk stream ids up to 65599
 const maxCsid = 65599
 
+// A peer picks its own chunk stream ids and the length of every message it
+// starts, and a message is buffered until it is complete. Without a bound a
+// peer could interleave thousands of chunk streams, each with a 16 MiB
+// message announced and never finished, and make the process allocate
+// unbounded memory. Real clients use a handful of chunk streams.
+const (
+	defaultMaxChunkStreams   = 64
+	defaultMaxBufferedMsgLen = 32 << 20
+)
+
+var (
+	errTooManyChunkStreams = errors.New("rtmp: too many chunk streams")
+	errBufferedTooMuch     = errors.New("rtmp: too many bytes buffered in incomplete messages")
+)
+
 var (
 	errInvalidCsid     = errors.New("rtmp: chunk stream id out of range")
 	errInvalidChunkFmt = errors.New("rtmp: unknown chunk format")
@@ -378,15 +393,22 @@ type chunkStreamReader struct {
 	headCache []byte
 	// recvBytes counts every byte fed into readRtmpMessage, used for acknowledgement
 	recvBytes uint64
+	// limits on what an unauthenticated peer can make us buffer
+	maxChunkStreams   int
+	maxBufferedMsgLen int
+	// buffered is the running total of payload held in incomplete messages
+	buffered int
 }
 
 func newChunkStreamReader(chunkSize uint32) *chunkStreamReader {
 	return &chunkStreamReader{
-		current:   newChunkStream(),
-		cks:       make(map[uint32]*chunkStream),
-		state:     S_BASIC_HEAD,
-		chunkSize: chunkSize,
-		headCache: make([]byte, 0, 14),
+		current:           newChunkStream(),
+		cks:               make(map[uint32]*chunkStream),
+		state:             S_BASIC_HEAD,
+		chunkSize:         chunkSize,
+		headCache:         make([]byte, 0, 14),
+		maxChunkStreams:   defaultMaxChunkStreams,
+		maxBufferedMsgLen: defaultMaxBufferedMsgLen,
 	}
 }
 
@@ -415,6 +437,9 @@ func (reader *chunkStreamReader) readRtmpMessage(data []byte, onMsg func(*rtmpMe
 			basic := basicHead{}
 			basic.decode(reader.headCache)
 			if stream, found := reader.cks[basic.csid]; !found {
+				if reader.maxChunkStreams > 0 && len(reader.cks) >= reader.maxChunkStreams {
+					return fmt.Errorf("%w: %d", errTooManyChunkStreams, basic.csid)
+				}
 				reader.current = newChunkStream()
 				reader.cks[basic.csid] = reader.current
 			} else {
@@ -478,12 +503,17 @@ func (reader *chunkStreamReader) readRtmpMessage(data []byte, onMsg func(*rtmpMe
 				needLen = int(reader.chunkSize)
 			}
 			remain := needLen - cs.chunkRead
+			if reader.maxBufferedMsgLen > 0 && reader.buffered+remain > reader.maxBufferedMsgLen {
+				return errBufferedTooMuch
+			}
 			if len(data) < remain {
 				cs.message = append(cs.message, data...)
 				cs.chunkRead += len(data)
+				reader.buffered += len(data)
 				return nil
 			}
 			cs.message = append(cs.message, data[:remain]...)
+			reader.buffered += remain
 			data = data[remain:]
 			cs.chunkRead = 0
 			// the chunk is complete, whatever happens next the parser must look for a new basic header
@@ -502,6 +532,7 @@ func (reader *chunkStreamReader) readRtmpMessage(data []byte, onMsg func(*rtmpMe
 					streamid:  cs.pkt.msgHdr.msgStreamId,
 				}
 				copy(msg.msg, cs.message)
+				reader.buffered -= len(cs.message)
 				cs.message = cs.message[:0]
 				if err := onMsg(msg); err != nil {
 					return err

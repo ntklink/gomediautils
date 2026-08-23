@@ -225,6 +225,8 @@ func (psdemuxer *PSDemuxer) decodePes(bs *codec.BitStream, startPos int) error {
 	return nil
 }
 
+// Flush reports the tail of every stream that is still buffered. The buffers
+// are consumed, so calling it twice does not emit the same data again.
 func (psdemuxer *PSDemuxer) Flush() {
 	for _, stream := range psdemuxer.streamMap {
 		if len(stream.streamBuf) == 0 {
@@ -233,6 +235,7 @@ func (psdemuxer *PSDemuxer) Flush() {
 		if psdemuxer.OnFrame != nil {
 			psdemuxer.OnFrame(stream.streamBuf, stream.cid, stream.pts/90, stream.dts/90)
 		}
+		stream.streamBuf = stream.streamBuf[:0]
 	}
 }
 

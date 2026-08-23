@@ -19,6 +19,17 @@ func GetUint24(b []byte) (v uint32) {
 	return v
 }
 
+// GetInt24 reads a big endian SI24, sign extending it to an int32. The flv
+// CompositionTime field is signed: a stream whose first frames are reordered
+// carries a negative offset there.
+func GetInt24(b []byte) int32 {
+	v := GetUint24(b)
+	if v&0x800000 != 0 {
+		v |= 0xFF000000
+	}
+	return int32(v)
+}
+
 func CovertFlvVideoCodecId2MpegCodecId(cid FLV_VIDEO_CODEC_ID) codec.CodecID {
 	if cid == FLV_AVC {
 		return codec.CODECID_VIDEO_H264
@@ -52,13 +63,16 @@ func CovertCodecId2FlvVideoCodecId(cid codec.CodecID) FLV_VIDEO_CODEC_ID {
 }
 
 func CovertCodecId2SoundFromat(cid codec.CodecID) FLV_SOUND_FORMAT {
-	if cid == codec.CODECID_AUDIO_AAC {
+	switch cid {
+	case codec.CODECID_AUDIO_AAC:
 		return FLV_AAC
-	} else if cid == codec.CODECID_AUDIO_G711A {
+	case codec.CODECID_AUDIO_G711A:
 		return FLV_G711A
-	} else if cid == codec.CODECID_AUDIO_G711U {
+	case codec.CODECID_AUDIO_G711U:
 		return FLV_G711U
-	} else {
+	case codec.CODECID_AUDIO_MP3:
+		return FLV_MP3
+	default:
 		return FLV_SOUND_FORMAT_UNKNOWN
 	}
 }

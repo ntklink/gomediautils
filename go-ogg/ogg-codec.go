@@ -68,8 +68,13 @@ type oggParser interface {
 	// header consumes a codec header packet. It returns errNotHeader when the
 	// packet is media data rather than a header.
 	header(stream *oggStream, packet []byte) (err error)
-	// packet times one media packet.
+	// packet times one media packet. The timestamps are in the codec's own
+	// clock; clockRate says what that clock is.
 	packet(stream *oggStream, packet []byte) (frame []byte, pts uint64, dts uint64, err error)
+	// clockRate is how many timestamp units of this parser make a second, so
+	// the demuxer can report milliseconds like every other demuxer in this
+	// module. A parser that cannot say yet returns 0.
+	clockRate() uint64
 	gptopts(granulePos uint64) uint64
 	extraData() []byte
 }
@@ -156,6 +161,14 @@ func (opus *opusDemuxer) packet(stream *oggStream, packet []byte) (frame []byte,
 	opus.lastpts += codec.OpusPacketDuration(packet)
 	return
 }
+
+// clockRate is fixed for opus: granule positions and packet durations are
+// always counted in 48 kHz samples, whatever the encoder's input rate was
+// (rfc7845 section 4).
+func (opus *opusDemuxer) clockRate() uint64 {
+	return 48000
+}
+
 func (opus *opusDemuxer) gptopts(granulePos uint64) uint64 {
 	return 0
 }
@@ -246,6 +259,11 @@ func (vp8 *vp8Demuxer) packet(stream *oggStream, packet []byte) (frame []byte, p
 	dts = pts
 	vp8.pktIdx++
 	return
+}
+
+// clockRate for vp8 is the frame rate: its timestamps count frames.
+func (vp8 *vp8Demuxer) clockRate() uint64 {
+	return uint64(vp8.frameRate)
 }
 
 func (vp8 *vp8Demuxer) gptopts(granulePos uint64) uint64 {

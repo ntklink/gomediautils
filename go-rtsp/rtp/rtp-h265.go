@@ -51,30 +51,41 @@ func NewH265Packer(pt uint8, ssrc uint32, sequence uint16, mtu int) *H265Packer 
 	}
 }
 
+// Pack turns one access unit into rtp packets. The rtp marker bit delimits an
+// access unit, not a nalu, so the whole frame is split first and the marker is
+// set on the last packet only.
 func (h265 *H265Packer) Pack(data []byte, timestamp uint32) error {
-	var err error
+	var nalus [][]byte
 	codec.SplitFrame(data, func(nalu []byte) bool {
-		if len(nalu) == 0 {
-			return true
+		if len(nalu) > 0 {
+			nalus = append(nalus, nalu)
 		}
-		if len(nalu)+RTP_FIX_HEAD_LEN <= h265.mtu {
-			err = h265.packSingleNalu(nalu, timestamp)
-		} else {
-			err = h265.packFu(nalu, timestamp)
-		}
-		return err == nil
+		return true
 	})
-	return err
+	for i, nalu := range nalus {
+		last := i == len(nalus)-1
+		var err error
+		if len(nalu)+RTP_FIX_HEAD_LEN <= h265.mtu {
+			err = h265.packSingleNalu(nalu, timestamp, last)
+		} else {
+			err = h265.packFu(nalu, timestamp, last)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (h265 *H265Packer) packSingleNalu(nalu []byte, timestamp uint32) error {
-	//fmt.Println("pack single nalu")
+func (h265 *H265Packer) packSingleNalu(nalu []byte, timestamp uint32, last bool) error {
 	pkg := RtpPacket{}
 	pkg.Header.PayloadType = h265.pt
 	pkg.Header.SequenceNumber = h265.sequence
 	pkg.Header.SSRC = h265.ssrc
 	pkg.Header.Timestamp = timestamp
-	pkg.Header.Marker = 1
+	if last {
+		pkg.Header.Marker = 1
+	}
 	pkg.Payload = nalu
 	h265.sequence++
 	if h265.onRtp != nil {
@@ -86,7 +97,7 @@ func (h265 *H265Packer) packSingleNalu(nalu []byte, timestamp uint32) error {
 	return nil
 }
 
-func (h265 *H265Packer) packFu(nalu []byte, timestamp uint32) error {
+func (h265 *H265Packer) packFu(nalu []byte, timestamp uint32, last bool) error {
 	if len(nalu) < 3 {
 		return errors.New("h265 nalu too short for FU")
 	}
@@ -111,7 +122,9 @@ func (h265 *H265Packer) packFu(nalu []byte, timestamp uint32) error {
 		if len(nalu)+RTP_FIX_HEAD_LEN+3 <= h265.mtu {
 			end = true
 			length = len(nalu)
-			pkg.Header.Marker = 1
+			if last {
+				pkg.Header.Marker = 1
+			}
 		} else {
 			length = h265.mtu - RTP_FIX_HEAD_LEN - 3
 		}

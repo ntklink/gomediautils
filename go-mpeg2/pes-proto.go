@@ -162,6 +162,9 @@ func (pkg *PesPacket) Decode(bs *codec.BitStream) error {
 	if bs.RemainBytes() < 9 {
 		return errNeedMore
 	}
+	if bs.NextBits(24) != 0x000001 {
+		return errParser
+	}
 	bs.SkipBits(24)             //packet_start_code_prefix
 	pkg.Stream_id = bs.Uint8(8) //stream_id
 	pkg.PES_packet_length = bs.Uint16(16)
@@ -284,6 +287,9 @@ func (pkg *PesPacket) Decode(bs *codec.BitStream) error {
 func (pkg *PesPacket) DecodeMpeg1(bs *codec.BitStream) error {
 	if bs.RemainBytes() < 6 {
 		return errNeedMore
+	}
+	if bs.NextBits(24) != 0x000001 {
+		return errParser
 	}
 	bs.SkipBits(24)             //packet_start_code_prefix
 	pkg.Stream_id = bs.Uint8(8) //stream_id

@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,96 +53,137 @@ func (muxer *hlsMuxer) makeM3u8() string {
 	return m3u.String()
 }
 
-func generateM3U8(flvFile string) {
+// GenerateHLS turns a flv file into a fragmented mp4 HLS presentation in
+// outDir: an init segment, one media segment per fragment and the playlist
+// that ties them together. It reports the path of the playlist.
+func GenerateHLS(flvPath, outDir string) (string, error) {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return "", err
+	}
+
 	hls := &hlsMuxer{}
-	var muxer *mp4.Movmuxer = nil
-	var vtid uint32
-	var atid uint32
-	i := 0
-	filename := fmt.Sprintf("stream-%d.mp4", i)
-	mp4file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0666)
+	segIndex := 0
+	segName := func(i int) string { return fmt.Sprintf("stream-%d.mp4", i) }
+
+	segFile, err := os.OpenFile(filepath.Join(outDir, segName(0)), os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return "", err
 	}
-	muxer, err = mp4.CreateMp4Muxer(mp4file, mp4.WithMp4Flag(mp4.MP4_FLAG_DASH))
+	defer func() { segFile.Close() }()
+
+	muxer, err := mp4.CreateMp4Muxer(segFile, mp4.WithMp4Flag(mp4.MP4_FLAG_DASH))
 	if err != nil {
-		fmt.Println(err)
-		return
+		return "", err
 	}
+
+	var fragErr error
 	muxer.OnNewFragment(func(duration uint32, firstPts, firstDts uint64) {
-		fmt.Println("on segment", duration)
+		if fragErr != nil {
+			return
+		}
 		hls.segments = append(hls.segments, hlsSegment{
-			uri:      filename,
+			uri:      segName(segIndex),
 			duration: float32(duration) / 1000,
 		})
+		segFile.Close()
 
-		mp4file.Close()
-		if i == 0 {
-			initFile, _ := os.OpenFile("init.mp4", os.O_CREATE|os.O_RDWR, 0666)
-			muxer.WriteInitSegment(initFile)
+		if segIndex == 0 {
+			// the init segment holds the moov, which every segment refers to
+			initFile, err := os.OpenFile(filepath.Join(outDir, "init.mp4"), os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)
+			if err != nil {
+				fragErr = err
+				return
+			}
+			if err := muxer.WriteInitSegment(initFile); err != nil {
+				initFile.Close()
+				fragErr = err
+				return
+			}
 			initFile.Close()
 			hls.initUri = "init.mp4"
 		}
 
-		i++
-		filename = fmt.Sprintf("stream-%d.mp4", i)
-		mp4file, err = os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0666)
-		if err != nil {
-			fmt.Println(err)
+		segIndex++
+		segFile, fragErr = os.OpenFile(filepath.Join(outDir, segName(segIndex)), os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)
+		if fragErr != nil {
 			return
 		}
-		muxer.ReBindWriter(mp4file)
+		muxer.ReBindWriter(segFile)
 	})
-	vtid, err = muxer.AddVideoTrack(mp4.MP4_CODEC_H264)
+
+	vtid, err := muxer.AddVideoTrack(mp4.MP4_CODEC_H264)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
-	atid, err = muxer.AddAudioTrack(mp4.MP4_CODEC_AAC)
+	atid, err := muxer.AddAudioTrack(mp4.MP4_CODEC_AAC)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 
-	flvfilereader, _ := os.Open(flvFile)
-	defer flvfilereader.Close()
-	fr := flv.CreateFlvReader()
+	flvFile, err := os.Open(flvPath)
+	if err != nil {
+		return "", err
+	}
+	defer flvFile.Close()
 
-	fr.OnFrame = func(ci codec.CodecID, b []byte, pts, dts uint32) {
-		if ci == codec.CODECID_AUDIO_AAC {
-			err := muxer.Write(atid, b, uint64(pts), uint64(dts))
-			if err != nil {
-				fmt.Println(err)
-			}
-		} else if ci == codec.CODECID_VIDEO_H264 {
-			err := muxer.Write(vtid, b, uint64(pts), uint64(dts))
-			if err != nil {
-				fmt.Println(err)
-			}
+	var writeErr error
+	reader := flv.CreateFlvReader()
+	reader.OnFrame = func(cid codec.CodecID, frame []byte, pts, dts uint32) {
+		if writeErr != nil {
+			return
+		}
+		switch cid {
+		case codec.CODECID_AUDIO_AAC:
+			writeErr = muxer.Write(atid, frame, uint64(pts), uint64(dts))
+		case codec.CODECID_VIDEO_H264:
+			writeErr = muxer.Write(vtid, frame, uint64(pts), uint64(dts))
 		}
 	}
 
-	cache := make([]byte, 4096)
+	cache := make([]byte, 64*1024)
 	for {
-		n, err := flvfilereader.Read(cache)
-		if err != nil {
-			fmt.Println(err)
-			break
+		n, err := flvFile.Read(cache)
+		if n > 0 {
+			if err := reader.Input(cache[:n]); err != nil {
+				return "", err
+			}
 		}
-		fr.Input(cache[0:n])
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", err
+		}
 	}
-	muxer.FlushFragment()
-	m3u8Name := "test.m3u8"
-	m3u8, _ := os.OpenFile(m3u8Name, os.O_CREATE|os.O_RDWR, 0666)
-	defer m3u8.Close()
-	m3u8.WriteString(hls.makeM3u8())
-	mp4file.Close()
+	if writeErr != nil {
+		return "", writeErr
+	}
+	if fragErr != nil {
+		return "", fragErr
+	}
+	if err := muxer.FlushFragment(); err != nil {
+		return "", err
+	}
+	if fragErr != nil {
+		return "", fragErr
+	}
+	segFile.Close()
+
+	playlist := filepath.Join(outDir, "test.m3u8")
+	if err := os.WriteFile(playlist, []byte(hls.makeM3u8()), 0o666); err != nil {
+		return "", err
+	}
+	return playlist, nil
 }
+
+// hlsDir is where the generated presentation lives, served by onHLSVod.
+var hlsDir = "."
 
 func onHLSVod(w http.ResponseWriter, r *http.Request) {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024*1024))
 	if strings.LastIndex(r.URL.Path, "m3u8") != -1 {
 		fmt.Println("request m3u8", r.URL.Path)
-		m3u8, err := os.Open("test.m3u8")
+		m3u8, err := os.Open(filepath.Join(hlsDir, "test.m3u8"))
 		if err != nil {
 			return
 		}
@@ -149,8 +193,8 @@ func onHLSVod(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "application/vnd.apple.mpegurl")
 	} else {
 		fmt.Println("request fmp4", r.URL.Path)
-		fmp4File := strings.TrimLeft(r.URL.Path, "/vod/")
-		fmp4, err := os.Open(fmp4File)
+		fmp4File := strings.TrimPrefix(r.URL.Path, "/vod/")
+		fmp4, err := os.Open(filepath.Join(hlsDir, filepath.Base(fmp4File)))
 		if err != nil {
 			return
 		}
@@ -168,7 +212,19 @@ func onHLSVod(w http.ResponseWriter, r *http.Request) {
 
 // http://127.0.0.1:19999/vod/test.m3u8
 func main() {
-	generateM3U8(os.Args[1])
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "usage: %s <input.flv> [outdir]\n", os.Args[0])
+		os.Exit(2)
+	}
+	outDir := "."
+	if len(os.Args) > 2 {
+		outDir = os.Args[2]
+	}
+	if _, err := GenerateHLS(os.Args[1], outDir); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	hlsDir = outDir
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/vod/", onHLSVod)

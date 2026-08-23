@@ -3,7 +3,13 @@ package codec
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
+
+// ErrShortSPS is reported when an sps is too short to build an
+// AVCDecoderConfigurationRecord from: the record copies profile_idc, the
+// constraint flags and level_idc out of the bytes right after the nal header.
+var ErrShortSPS = errors.New("codec: h264 sps shorter than 4 bytes")
 
 // nal_unit( NumBytesInNALunit ) {
 //     forbidden_zero_bit All         f(1)
@@ -406,18 +412,33 @@ func CreateH264AVCCExtradata(spss [][]byte, ppss [][]byte) ([]byte, error) {
 	if len(spss) == 0 || len(ppss) == 0 {
 		return nil, errors.New("lack of sps or pps")
 	}
+	// the counts go into 5 and 8 bit fields of the record
+	if len(spss) > 31 {
+		return nil, fmt.Errorf("codec: %d sps, an avcC record holds at most 31", len(spss))
+	}
+	if len(ppss) > 255 {
+		return nil, fmt.Errorf("codec: %d pps, an avcC record holds at most 255", len(ppss))
+	}
+
+	// strip the start codes without touching the caller's slices: the
+	// parameter sets usually belong to a muxer that keeps using them
+	sps := make([][]byte, len(spss))
+	for i := range spss {
+		sps[i] = NaluBody(spss[i])
+	}
+	pps := make([][]byte, len(ppss))
+	for i := range ppss {
+		pps[i] = NaluBody(ppss[i])
+	}
+	spss, ppss = sps, pps
+
+	// the record copies profile_idc, constraint flags and level_idc out of
+	// the first sps, which therefore has to carry them
+	if len(spss[0]) < 4 {
+		return nil, ErrShortSPS
+	}
 
 	extradata := make([]byte, 6, 256)
-	for i, sps := range spss {
-		start, sc := FindStartCode(sps, 0)
-		spss[i] = sps[start+int(sc):]
-	}
-
-	for i, pps := range ppss {
-		start, sc := FindStartCode(pps, 0)
-		ppss[i] = pps[start+int(sc):]
-	}
-
 	extradata[0] = 0x01
 	extradata[1] = spss[0][1]
 	extradata[2] = spss[0][2]
@@ -515,7 +536,13 @@ func ConvertAnnexBToAVCC(annexb []byte) []byte {
 	return avcc
 }
 
+// CovertAVCCToAnnexB rewrites the 4 byte length prefix at the head of avcc
+// into an Annex-B start code, in place. A buffer too short to hold a length
+// prefix is left untouched.
 func CovertAVCCToAnnexB(avcc []byte) {
+	if len(avcc) < 4 {
+		return
+	}
 	avcc[0] = 0x00
 	avcc[1] = 0x00
 	avcc[2] = 0x00

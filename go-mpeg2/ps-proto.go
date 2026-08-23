@@ -14,7 +14,27 @@ type Error interface {
 	StreamIdNotFound() bool
 }
 
-var errNeedMore error = &needmoreError{}
+// ErrNeedMore is how a decoder says the buffer ended in the middle of a
+// packet. It is part of the normal path, not a failure: PSDemuxer.Input
+// returns it whenever the tail of the buffer is a partial packet, and the
+// caller is meant to hand over more bytes rather than give up. Test for it
+// with errors.Is.
+var ErrNeedMore error = &needmoreError{}
+
+// ErrParser reports a packet that does not decode: a bad start code, a
+// length that runs past the end of the packet, a reserved value.
+var ErrParser error = &parserError{}
+
+// ErrStreamIdNotFound reports a write for a stream id AddStream never
+// returned.
+var ErrStreamIdNotFound error = &sidNotFoundError{}
+
+// The unexported names the rest of the package is written against.
+var (
+	errNeedMore = ErrNeedMore
+	errParser   = ErrParser
+	errNotFound = ErrStreamIdNotFound
+)
 
 type needmoreError struct{}
 
@@ -23,16 +43,12 @@ func (e *needmoreError) NeedMore() bool         { return true }
 func (e *needmoreError) ParserError() bool      { return false }
 func (e *needmoreError) StreamIdNotFound() bool { return false }
 
-var errParser error = &parserError{}
-
 type parserError struct{}
 
 func (e *parserError) Error() string          { return "parser packet error" }
 func (e *parserError) NeedMore() bool         { return false }
 func (e *parserError) ParserError() bool      { return true }
 func (e *parserError) StreamIdNotFound() bool { return false }
-
-var errNotFound error = &sidNotFoundError{}
 
 type sidNotFoundError struct{}
 

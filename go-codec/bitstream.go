@@ -396,7 +396,18 @@ func (bsw *BitStreamWriter) PutUint32(v uint32, n int) {
 	bsw.PutUint64(uint64(v), n)
 }
 
+// ErrBadBitCount is reported by BitStreamWriter.Err after a write of a bit
+// count that cannot be encoded (n outside 1..64).
+var ErrBadBitCount = errors.New("codec: bit count out of range")
+
 func (bsw *BitStreamWriter) PutUint64(v uint64, n int) {
+	if bsw.err != nil {
+		return
+	}
+	if n <= 0 || n > 64 {
+		bsw.err = ErrBadBitCount
+		return
+	}
 	bsw.expandSpace(n)
 	if 8-bsw.bitsoffset >= n {
 		bsw.bits[bsw.byteoffset] |= uint8(v) & bitMask[n-1] << (8 - bsw.bitsoffset - n)
@@ -421,12 +432,30 @@ func (bsw *BitStreamWriter) PutUint64(v uint64, n int) {
 	}
 }
 
+// SetByte patches a byte that was already written. An out of range position
+// puts the writer into the error state instead of panicking.
 func (bsw *BitStreamWriter) SetByte(v byte, where int) {
+	if where < 0 || where >= len(bsw.bits) {
+		bsw.Fail(ErrOutOfRange)
+		return
+	}
 	bsw.bits[where] = v
 }
 
+// SetUint16 patches two bytes that were already written.
 func (bsw *BitStreamWriter) SetUint16(v uint16, where int) {
+	if where < 0 || where+2 > len(bsw.bits) {
+		bsw.Fail(ErrOutOfRange)
+		return
+	}
 	binary.BigEndian.PutUint16(bsw.bits[where:where+2], v)
+}
+
+// Fail puts the writer into the error state with a specific reason.
+func (bsw *BitStreamWriter) Fail(err error) {
+	if bsw.err == nil {
+		bsw.err = err
+	}
 }
 
 func (bsw *BitStreamWriter) Bits() []byte {
@@ -440,9 +469,21 @@ func (bsw *BitStreamWriter) Bits() []byte {
 	}
 }
 
-// 用v 填充剩余字节
+// FillRemainData fills every byte that has not been written yet with v. A
+// partially written byte is kept: only the bits after the write position are
+// taken from v, so the bits already in the buffer survive.
 func (bsw *BitStreamWriter) FillRemainData(v byte) {
-	for i := bsw.byteoffset; i < len(bsw.bits); i++ {
+	i := bsw.byteoffset
+	if bsw.bitsoffset > 0 {
+		if i >= len(bsw.bits) {
+			return
+		}
+		// keep the high bitsoffset bits, take the rest from v
+		keep := bsw.bits[i] &^ bitMask[7-bsw.bitsoffset]
+		bsw.bits[i] = keep | (v & bitMask[7-bsw.bitsoffset])
+		i++
+	}
+	for ; i < len(bsw.bits); i++ {
 		bsw.bits[i] = v
 	}
 	bsw.byteoffset = len(bsw.bits)

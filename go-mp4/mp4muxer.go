@@ -344,8 +344,8 @@ func (muxer *Movmuxer) writeMoov(w io.Writer) (err error) {
 	} else {
 		maxdurtaion := uint32(0)
 		for _, track := range muxer.tracks {
-			if maxdurtaion < track.duration {
-				maxdurtaion = track.duration
+			if d := track.mediaDuration(); maxdurtaion < d {
+				maxdurtaion = d
 			}
 		}
 		mvhd = makeMvhdBox(muxer.nextTrackId, maxdurtaion)
@@ -383,7 +383,9 @@ func (muxer *Movmuxer) writeMfra() (err error) {
 		mfraSize += len(tfras[i-1])
 	}
 
-	mfro := makeMfroBox(uint32(mfraSize) + 16)
+	// makeMfroBox adds the 16 bytes of the mfro box itself, so pass the size
+	// of the rest of the mfra box: its 8 byte header plus every tfra
+	mfro := makeMfroBox(uint32(mfraSize) + 8)
 	mfraSize += len(mfro)
 	mfra := BasicBox{Type: [4]byte{'m', 'f', 'r', 'a'}}
 	mfra.Size = 8 + uint64(mfraSize)
@@ -397,13 +399,39 @@ func (muxer *Movmuxer) writeMfra() (err error) {
 	return
 }
 
+// FlushFragment closes the fragment under construction and writes it out.
+//
+// It reports the fragment through OnNewFragment just like a fragment the
+// muxer cut on its own. A segmenter learns the name and length of a segment
+// from that callback, so staying silent here would drop the last segment of
+// every presentation from the playlist.
 func (muxer *Movmuxer) FlushFragment() (err error) {
 	for _, track := range muxer.tracks {
 		if err = track.flush(); err != nil {
 			return err
 		}
 	}
-	return muxer.flushFragment()
+	hadSamples := false
+	for _, track := range muxer.tracks {
+		if len(track.samplelist) > 0 {
+			hadSamples = true
+			break
+		}
+	}
+	if err = muxer.flushFragment(); err != nil {
+		return err
+	}
+	if !hadSamples || muxer.onNewFragment == nil {
+		return nil
+	}
+	hasVideo := muxer.hasVideoTrack()
+	for _, track := range muxer.tracks {
+		if hasVideo && isAudio(track.cid) {
+			continue
+		}
+		muxer.onNewFragment(track.duration, track.startPts, track.startDts)
+	}
+	return nil
 }
 
 func (muxer *Movmuxer) flushFragment() (err error) {

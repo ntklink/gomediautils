@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -61,10 +63,35 @@ type AudioConfig struct {
 type StreamSource struct {
 	streamName string
 	producer   *RtspServerSession
-	mtx        sync.Mutex
-	consumers  []*RtspServerSession
-	audioCfg   *AudioConfig
-	videoCfg   *VideoConfig
+	// The codec configuration is learned on the producer's dispatch
+	// goroutine and read when a consumer describes the stream, which is a
+	// different connection on a different goroutine.
+	mtx       sync.Mutex
+	consumers []*RtspServerSession
+	audioCfg  *AudioConfig
+	videoCfg  *VideoConfig
+}
+
+// configs returns the codec configuration learned so far, or nil for a
+// stream whose parameter sets have not arrived yet.
+//
+// The configs are copied rather than handed out: dispatch keeps filling them
+// in as more parameter sets arrive, and a describe that read them while that
+// happened would build an sdp out of half a configuration.
+func (s *StreamSource) configs() (*AudioConfig, *VideoConfig) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	var audio *AudioConfig
+	var video *VideoConfig
+	if s.audioCfg != nil {
+		cp := *s.audioCfg
+		audio = &cp
+	}
+	if s.videoCfg != nil {
+		cp := *s.videoCfg
+		video = &cp
+	}
+	return audio, video
 }
 
 func (s *StreamSource) addConsumer(sess *RtspServerSession) {
@@ -75,6 +102,7 @@ func (s *StreamSource) addConsumer(sess *RtspServerSession) {
 
 func (s *StreamSource) dispatch() {
 	for frame := range s.producer.readChan {
+		s.mtx.Lock()
 		if frame.frameType == 0 {
 			//	fmt.Println("video ts", frame.ts)
 			if s.videoCfg == nil {
@@ -130,7 +158,11 @@ func (s *StreamSource) dispatch() {
 			}
 		}
 
-		for _, c := range s.consumers {
+		consumers := make([]*RtspServerSession, len(s.consumers))
+		copy(consumers, s.consumers)
+		s.mtx.Unlock()
+
+		for _, c := range consumers {
 			c.SendFrame(frame)
 		}
 	}
@@ -217,33 +249,34 @@ func (impl *ServerHandleImpl) HandleDescribe(svr *rtsp.RtspServer, req rtsp.Rtsp
 		return
 	}
 
-	if source.audioCfg != nil {
-		if source.audioCfg.cid == codec.CODECID_AUDIO_AAC {
-			fmt.Println("add audio track", source.audioCfg.sampleRate)
+	audioCfg, videoCfg := source.configs()
+	if audioCfg != nil {
+		if audioCfg.cid == codec.CODECID_AUDIO_AAC {
+			fmt.Println("add audio track", audioCfg.sampleRate)
 			audioCodec := rtsp.RtspCodec{
 				Cid:          rtsp.RTSP_CODEC_AAC,
 				PayloadType:  97,
-				SampleRate:   uint32(source.audioCfg.sampleRate),
-				ChannelCount: uint8(source.audioCfg.channalCount),
+				SampleRate:   uint32(audioCfg.sampleRate),
+				ChannelCount: uint8(audioCfg.channalCount),
 			}
-			afp, _ := sdp.NewAACFmtpParam(sdp.WithAudioSpecificConfig(source.audioCfg.asc))
+			afp, _ := sdp.NewAACFmtpParam(sdp.WithAudioSpecificConfig(audioCfg.asc))
 			audioTrack := rtsp.NewAudioTrack(audioCodec, rtsp.WithCodecParamHandler(afp))
 			svr.AddTrack(audioTrack)
 			impl.sess.tracks["audio"] = audioTrack
 		}
 	}
 
-	if source.videoCfg != nil {
-		switch source.videoCfg.cid {
+	if videoCfg != nil {
+		switch videoCfg.cid {
 		case codec.CODECID_VIDEO_H264:
 			fmt.Println("add video track")
-			fmtpHandle, _ := sdp.NewH264FmtpParam(sdp.WithH264SPS(source.videoCfg.sps), sdp.WithH264PPS(source.videoCfg.pps))
+			fmtpHandle, _ := sdp.NewH264FmtpParam(sdp.WithH264SPS(videoCfg.sps), sdp.WithH264PPS(videoCfg.pps))
 			videoTrack := rtsp.NewVideoTrack(rtsp.RtspCodec{Cid: rtsp.RTSP_CODEC_H264, PayloadType: 96, SampleRate: 90000}, rtsp.WithCodecParamHandler(fmtpHandle))
 			svr.AddTrack(videoTrack)
 			impl.sess.tracks["video"] = videoTrack
 		case codec.CODECID_VIDEO_H265:
 			fmt.Println("add video track")
-			fmtpHandle, _ := sdp.NewH265FmtpParam(sdp.WithH265SPS(source.videoCfg.sps), sdp.WithH265PPS(source.videoCfg.pps), sdp.WithH265VPS(source.videoCfg.vps))
+			fmtpHandle, _ := sdp.NewH265FmtpParam(sdp.WithH265SPS(videoCfg.sps), sdp.WithH265PPS(videoCfg.pps), sdp.WithH265VPS(videoCfg.vps))
 			videoTrack := rtsp.NewVideoTrack(rtsp.RtspCodec{Cid: rtsp.RTSP_CODEC_H265, PayloadType: 98, SampleRate: 90000}, rtsp.WithCodecParamHandler(fmtpHandle))
 			svr.AddTrack(videoTrack)
 			impl.sess.tracks["video"] = videoTrack
@@ -263,19 +296,15 @@ func (impl *ServerHandleImpl) HandleAnnounce(svr *rtsp.RtspServer, req rtsp.Rtsp
 	fmt.Println("handle announce")
 	streamName := req.Uri[strings.LastIndex(req.Uri, "/")+1:]
 	fmt.Println("stream name ", streamName)
-	source := &StreamSource{}
-	fmt.Println(g_manager)
-	go source.dispatch()
-	g_manager.addSource(streamName, source)
-	source.producer = impl.sess
+	// the producer has to be in place before dispatch starts, because that
+	// is the channel it reads
+	source := &StreamSource{producer: impl.sess}
 	impl.sess.name = streamName
 	impl.sess.isProducer = true
+	go source.dispatch()
+	g_manager.addSource(streamName, source)
 	if atrack, found := tracks["audio"]; found {
-		afile, err := os.OpenFile("rtsp.aac", os.O_CREATE|os.O_RDWR, 0666)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
+		afile := openDump("audio", audioCodecName(tracks))
 		atrack.OnSample(func(sample rtsp.RtspSample) {
 			frame := &RtspFrame{
 				frameType: 1,
@@ -285,16 +314,14 @@ func (impl *ServerHandleImpl) HandleAnnounce(svr *rtsp.RtspServer, req rtsp.Rtsp
 				ts:        sample.Timestamp,
 			}
 			source.producer.readChan <- frame
-			afile.Write(frame.frame)
+			if afile != nil {
+				afile.Write(frame.frame)
+			}
 		})
 	}
 
 	if vtrack, found := tracks["video"]; found {
-		vfile, err := os.OpenFile("rtsp.h265", os.O_CREATE|os.O_RDWR, 0666)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
+		vfile := openDump("video", videoCodecName(tracks))
 		vtrack.OnSample(func(sample rtsp.RtspSample) {
 			frame := &RtspFrame{
 				frameType: 0,
@@ -314,11 +341,53 @@ func (impl *ServerHandleImpl) HandleAnnounce(svr *rtsp.RtspServer, req rtsp.Rtsp
 					frame.keyFrame = 1
 				}
 			}
-			vfile.Write(frame.frame)
+			if vfile != nil {
+				vfile.Write(frame.frame)
+			}
 			source.producer.readChan <- frame
 
 		})
 	}
+}
+
+// dumpDir, when set with -dump, is where the received elementary streams are
+// written for inspection. It is off by default: a server that drops files in
+// the working directory every time a client connects is a nuisance.
+var dumpDir = flag.String("dump", "", "directory to dump received elementary streams into")
+
+func openDump(kind, ext string) *os.File {
+	if *dumpDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(*dumpDir, 0o755); err != nil {
+		fmt.Println(err)
+		return nil
+	}
+	f, err := os.OpenFile(filepath.Join(*dumpDir, kind+"."+ext), os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+	return f
+}
+
+func videoCodecName(tracks map[string]*rtsp.RtspTrack) string {
+	if t, ok := tracks["video"]; ok && t.Codec.Cid == rtsp.RTSP_CODEC_H265 {
+		return "h265"
+	}
+	return "h264"
+}
+
+func audioCodecName(tracks map[string]*rtsp.RtspTrack) string {
+	if t, ok := tracks["audio"]; ok {
+		switch t.Codec.Cid {
+		case rtsp.RTSP_CODEC_G711A:
+			return "alaw"
+		case rtsp.RTSP_CODEC_G711U:
+			return "ulaw"
+		}
+	}
+	return "aac"
 }
 
 func (impl *ServerHandleImpl) HandlePlay(svr *rtsp.RtspServer, req rtsp.RtspRequest, res *rtsp.RtspResponse, timeRange *rtsp.RangeTime, info []*rtsp.RtpInfo) {
@@ -356,17 +425,36 @@ func (impl *ServerHandleImpl) HandleResponse(svr *rtsp.RtspServer, res rtsp.Rtsp
 
 }
 
-func main() {
-	addr := "0.0.0.0:554"
+// Listen starts the rtsp server on addr and returns the listener, so a caller
+// can ask for an ephemeral port ("127.0.0.1:0") and shut it down again.
+// Serving runs in the background until the listener is closed.
+func Listen(addr string) (net.Listener, error) {
 	listen, err := net.Listen("tcp4", addr)
+	if err != nil {
+		return nil, err
+	}
+	go serve(listen)
+	return listen, nil
+}
+
+func serve(listen net.Listener) {
+	for {
+		conn, err := listen.Accept()
+		if err != nil {
+			return
+		}
+		sess := NewRtspServerSession(conn)
+		go sess.Start()
+	}
+}
+
+func main() {
+	flag.Parse()
+	listen, err := Listen("0.0.0.0:554")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer listen.Close()
-	for {
-		conn, _ := listen.Accept()
-		sess := NewRtspServerSession(conn)
-		go sess.Start()
-	}
+	select {}
 }

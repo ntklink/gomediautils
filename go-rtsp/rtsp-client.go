@@ -470,10 +470,16 @@ func (client *RtspClient) handleDescribe(res *RtspResponse) (err error) {
 		}
 	}
 
+	// A session level "a=control" is optional (rfc2326 C.1.1): without one
+	// the base url is itself the aggregate control url, and the media level
+	// control urls are resolved against it. Servers that leave it out are
+	// common, gortsplib and ffmpeg's rtsp muxer among them, so rejecting the
+	// description makes those streams unplayable.
 	if client.sdpContext.ControlUrl == "" {
-		return errors.New("unsupport empty aggregate control url in session level descriptions")
+		client.sdpContext.ControlUrl = baseUrl
+	} else {
+		client.sdpContext.ControlUrl = getControlUrl(client.sdpContext.ControlUrl)
 	}
-	client.sdpContext.ControlUrl = getControlUrl(client.sdpContext.ControlUrl)
 	for _, media := range client.sdpContext.Medias {
 		fmtpHandle := sdp.CreateFmtpParamParser(media.EncodeName)
 		if fmtpHandle != nil {

@@ -136,12 +136,13 @@ func (mux *TSMuxer) AddStream(cid TS_STREAM_TYPE) uint16 {
 func (mux *TSMuxer) Write(pid uint16, data []byte, pts uint64, dts uint64) error {
 	var whichpmt *table_pmt = nil
 	var whichstream *pes_stream = nil
+search:
 	for _, pmt := range mux.pat.pmts {
 		for _, stream := range pmt.streams {
 			if stream.pid == pid {
 				whichpmt = pmt
 				whichstream = stream
-				break
+				break search
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package rtcp
 
 import (
+	"sync"
 	"time"
 
 	"github.com/yapingcat/gomedia/go-rtsp/rtp"
@@ -8,7 +9,16 @@ import (
 
 //https://www.rfc-editor.org/rfc/rfc3550#section-17
 
+// RtcpContext keeps the statistics rfc3550 reports are built from.
+//
+// It is safe for concurrent use, and has to be: the counters are updated on
+// whichever goroutine sends or receives rtp, while the reports that read
+// them are generated on a timer of their own. That split is not a choice a
+// caller makes, it is what an rtcp interval is, so the locking belongs here
+// rather than in every session that owns a context.
 type RtcpContext struct {
+	mtx sync.Mutex
+
 	ssrc             uint32
 	senderSSRC       uint32
 	maxSeq           uint16
@@ -52,6 +62,9 @@ func NewRtcpContext(ssrc uint32, seq uint16, sampleRate uint32) *RtcpContext {
 // }
 
 func (ctx *RtcpContext) GenerateApp(name string, data []byte) *App {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	app := NewApp()
 	app.SSRC = ctx.ssrc
 	app.Name = []byte(name)
@@ -61,6 +74,9 @@ func (ctx *RtcpContext) GenerateApp(name string, data []byte) *App {
 }
 
 func (ctx *RtcpContext) GenerateBye() *Bye {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	bye := NewBye()
 	bye.SC = 1
 	bye.SSRCS = make([]uint32, 1)
@@ -69,6 +85,9 @@ func (ctx *RtcpContext) GenerateBye() *Bye {
 }
 
 func (ctx *RtcpContext) GenerateSDES(sdesType uint8, txt string) *SourceDescription {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	sdes := NewSourceDescription()
 	sdes.SC = 1
 	sdes.Chunks = make([]SDESChunk, 1)
@@ -81,12 +100,18 @@ func (ctx *RtcpContext) GenerateSDES(sdesType uint8, txt string) *SourceDescript
 }
 
 func (ctx *RtcpContext) GenerateSR() *SenderReport {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	sr := &SenderReport{Comm: Comm{PT: RTCP_SR}, RC: 0, SSRC: ctx.ssrc, RtpTimestamp: ctx.lastRtpTimestamp, SendPacketCount: uint32(ctx.sendPackets), SendOctetCount: uint32(ctx.sendBytes)}
 	sr.NTP = UtcClockToNTP(time.Now())
 	return sr
 }
 
 func (ctx *RtcpContext) GenerateRR() *ReceiverReport {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	rr := &ReceiverReport{Comm: Comm{PT: RTCP_RR}, RC: 1, SSRC: ctx.ssrc, Blocks: make([]ReportBlock, 1)}
 	rr.Blocks[0].SSRC = ctx.senderSSRC
 	block := ctx.getReportBlock()
@@ -95,12 +120,18 @@ func (ctx *RtcpContext) GenerateRR() *ReceiverReport {
 }
 
 func (ctx *RtcpContext) ReceivedSR(sr *SenderReport) {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	ctx.srClockTime = uint64(time.Now().UnixNano() / 1000)
 	ctx.srNtpLsr = sr.NTP
 	ctx.senderSSRC = sr.SSRC
 }
 
 func (ctx *RtcpContext) SendRtp(pkt *rtp.RtpPacket) {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	ctx.sendBytes += uint64(len(pkt.Payload))
 	ctx.sendPackets++
 	ctx.lastRtpTimestamp = pkt.Header.Timestamp
@@ -114,6 +145,9 @@ func (ctx *RtcpContext) SendRtp(pkt *rtp.RtpPacket) {
 // s->jitter += (1./16.) * ((double)d - s->jitter);
 
 func (ctx *RtcpContext) ReceivedRtp(pkt *rtp.RtpPacket) {
+	ctx.mtx.Lock()
+	defer ctx.mtx.Unlock()
+
 	if ctx.updateSeq(pkt.Header.SequenceNumber) == 0 {
 		return
 	}

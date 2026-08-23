@@ -13,7 +13,13 @@ const (
 	START_CODE_4 START_CODE_TYPE = 4
 )
 
+// FindStartCode returns the offset of the next Annex-B start code at or after
+// offset, together with its length. It returns -1 when there is none; an
+// offset outside the buffer is treated as "nothing left to search".
 func FindStartCode(nalu []byte, offset int) (int, START_CODE_TYPE) {
+	if offset < 0 || offset >= len(nalu) {
+		return -1, START_CODE_3
+	}
 	idx := bytes.Index(nalu[offset:], []byte{0x00, 0x00, 0x01})
 	switch {
 	case idx > 0:
@@ -99,6 +105,15 @@ func SplitAACFrame(frames []byte, onFrame func(aac []byte)) error {
 		start = FindSyncword(frames, start+frameLen)
 	}
 	return nil
+}
+
+// NaluBody returns nalu without its Annex-B start code. A buffer that carries
+// no start code is returned unchanged.
+func NaluBody(nalu []byte) []byte {
+	if start, sc := FindStartCode(nalu, 0); start >= 0 {
+		return nalu[start+int(sc):]
+	}
+	return nalu
 }
 
 // naluOffset returns the index of the nalu header inside buf. The buffer may

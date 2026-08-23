@@ -2,6 +2,7 @@ package codec
 
 import (
 	"bytes"
+	"errors"
 	"math/rand"
 	"testing"
 )
@@ -461,5 +462,59 @@ func TestGetH265PPSIdWithStartCode(t *testing.T) {
 	}
 	if got := GetH265PPSIdWithStartCode(pps2); got != 1 {
 		t.Fatalf("pps2 id %d, want 1", got)
+	}
+}
+
+// An sps too short to carry profile_idc/constraint flags/level_idc cannot
+// produce an avcC record; it must be reported, not indexed past.
+func TestCreateH264AVCCExtradataShortSPS(t *testing.T) {
+	sps := []byte{0x00, 0x00, 0x00, 0x01, 0x67}
+	pps := []byte{0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80}
+	if _, err := CreateH264AVCCExtradata([][]byte{sps}, [][]byte{pps}); !errors.Is(err, ErrShortSPS) {
+		t.Fatalf("want ErrShortSPS, got %v", err)
+	}
+}
+
+// The parameter sets belong to the caller: building a record must not rewrite
+// the slices it is handed, or the caller's next use of them sees stripped
+// start codes.
+func TestCreateH264AVCCExtradataDoesNotMutateInput(t *testing.T) {
+	sps := []byte{0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e, 0xd9, 0x00, 0xb0, 0x7b, 0x60, 0x22, 0x00, 0x00}
+	pps := []byte{0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80}
+	spss := [][]byte{sps}
+	ppss := [][]byte{pps}
+	if _, err := CreateH264AVCCExtradata(spss, ppss); err != nil {
+		t.Fatal(err)
+	}
+	if len(spss[0]) != len(sps) || len(ppss[0]) != len(pps) {
+		t.Errorf("input slices were rewritten: sps %d/%d, pps %d/%d",
+			len(spss[0]), len(sps), len(ppss[0]), len(pps))
+	}
+	// a second call has to produce the same record
+	first, err := CreateH264AVCCExtradata(spss, ppss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := CreateH264AVCCExtradata(spss, ppss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Errorf("record differs between calls:\n%x\n%x", first, second)
+	}
+}
+
+// An sps that carries no start code is a whole nalu, not a nalu missing two
+// bytes.
+func TestCreateH264AVCCExtradataWithoutStartCode(t *testing.T) {
+	sps := []byte{0x67, 0x42, 0x00, 0x1e, 0xd9, 0x00, 0xb0, 0x7b, 0x60, 0x22, 0x00, 0x00}
+	pps := []byte{0x68, 0xce, 0x3c, 0x80}
+	got, err := CreateH264AVCCExtradata([][]byte{sps}, [][]byte{pps})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// bytes 1..3 of the record are profile_idc, compatibility, level_idc
+	if got[1] != sps[1] || got[2] != sps[2] || got[3] != sps[3] {
+		t.Errorf("record header %x, want %x from the sps", got[1:4], sps[1:4])
 	}
 }

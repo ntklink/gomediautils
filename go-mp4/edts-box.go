@@ -108,39 +108,44 @@ func (elst *EditListBox) Decode(r io.Reader) (offset int, err error) {
 	return offset + nn, nil
 }
 
+// makeElstBox writes the edit list that maps the media timeline onto the
+// presentation.
+//
+// The sample table always starts the media timeline at decode time 0, so with
+// reordered frames the first picture is presented at its composition offset,
+// not at 0. media_time has to name that offset: an edit that starts at 0
+// tells the player to present from a point where no picture exists yet, and
+// ffmpeg reacts by reporting "missing key frame while searching for timestamp
+// 0" and dropping the frames of the reorder delay.
+//
+// media_time is in the media timescale, segment_duration in the movie one.
 func makeElstBox(track *mp4track) (boxdata []byte) {
-	//startCt := track.samplelist[0].pts - track.samplelist[0].dts
-	delay := track.samplelist[0].pts * 1000 / uint64(track.timescale)
-	entryCount := 1
+	// composition offset of the first sample, in media timescale units
+	mediaTime := int64(track.samplelist[0].pts) - int64(track.samplelist[0].dts)
+	if mediaTime < 0 {
+		mediaTime = 0
+	}
+
+	duration := uint64(track.mediaDuration())
+
 	version := uint32(0)
-	boxSize := 12
 	entrySize := 12
-	if delay > 0xFFFFFFFF {
+	if duration > 0xFFFFFFFF || mediaTime > 0xFFFFFFFF {
 		version = 1
 		entrySize = 20
 	}
-	// if delay > 0 {
-	// 	entryCount += 1
-	// }
-	boxSize += 4 + entrySize*entryCount
+
 	elst := NewEditListBox(version)
 	elst.entrys = new(movelst)
-	elst.entrys.entryCount = uint32(entryCount)
-	elst.entrys.entrys = make([]elstEntry, entryCount)
-	// if entryCount > 1 {
-	// 	elst.entrys.entrys[0].segmentDuration = startCt
-	// 	elst.entrys.entrys[0].mediaTime = -1
-	// 	elst.entrys.entrys[0].mediaRateInteger = 0x0001
-	// 	elst.entrys.entrys[0].mediaRateFraction = 0
-	// }
+	elst.entrys.entryCount = 1
+	elst.entrys.entrys = []elstEntry{{
+		segmentDuration:   duration,
+		mediaTime:         mediaTime,
+		mediaRateInteger:  0x0001,
+		mediaRateFraction: 0,
+	}}
 
-	//简单起见，mediaTime先固定为0,即不延迟播放
-	elst.entrys.entrys[entryCount-1].segmentDuration = uint64(track.duration)
-	elst.entrys.entrys[entryCount-1].mediaTime = 0
-	elst.entrys.entrys[entryCount-1].mediaRateInteger = 0x0001
-	elst.entrys.entrys[entryCount-1].mediaRateFraction = 0
-
-	elst.box.Box.Size = uint64(boxSize)
+	elst.box.Box.Size = uint64(FullBoxLen + 4 + entrySize)
 	_, boxdata = elst.Encode()
 	return
 }

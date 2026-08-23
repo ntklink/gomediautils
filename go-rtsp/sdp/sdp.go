@@ -158,11 +158,34 @@ type Sdp struct {
 	Medias         []*Media
 }
 
+// Encode renders the session description.
+//
+// The connection address defaults to 0.0.0.0, the unspecified address. It has
+// to be *something*: rfc4566 defines "c=" as three fields, and a peer that
+// splits the line, as every parser does, rejects a description whose third
+// field is missing. 0.0.0.0 is the right nothing to say here, because in rtsp
+// the media never travels to the address in the sdp anyway; the transport
+// header of SETUP decides that.
 func (sdp *Sdp) Encode() string {
+	name := sdp.SessionName
+	if name == "" {
+		name = "gomedia rtsp"
+	}
+	conn := sdp.ConnectionData
+	if conn.Nettype == "" {
+		conn.Nettype = "IN"
+	}
+	if conn.Addrtype == "" {
+		conn.Addrtype = "IP4"
+	}
+	if conn.Address == "" {
+		conn.Address = "0.0.0.0"
+	}
+
 	sdptxt := "v=0\r\n"
 	sdptxt += "o=- 0 0 IN IP4 0.0.0.0\r\n"
-	sdptxt += "s=gomedia rtsp\r\n"
-	sdptxt += "c=IN IP4 \r\n"
+	sdptxt += "s=" + name + "\r\n"
+	sdptxt += "c=" + conn.Nettype + " " + conn.Addrtype + " " + conn.Address + "\r\n"
 	sdptxt += "t=0 0\r\n"
 	for attrName, attrValue := range sdp.Attrs {
 		sdptxt += "a=" + attrName

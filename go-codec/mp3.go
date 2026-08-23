@@ -3,7 +3,6 @@ package codec
 import (
 	"bytes"
 	"errors"
-	"fmt"
 )
 
 //mp3 file format
@@ -323,7 +322,8 @@ func SplitMp3Frames(data []byte, onFrame func(head *MP3FrameHead, frame []byte))
 			if len(data) < 10 {
 				return errors.New("ID3V2 tag head must has 10 bytes")
 			}
-			fmt.Println("Get ID3 tag")
+			// ID3v2 sizes are seven bits per byte so the syncword can
+			// never appear inside the length field
 			var size uint32 = uint32(data[6] & 0x7F)
 			size = size<<7 | uint32(data[7]&0x7F)
 			size = size<<7 | uint32(data[8]&0x7F)
@@ -332,7 +332,6 @@ func SplitMp3Frames(data []byte, onFrame func(head *MP3FrameHead, frame []byte))
 				return errors.New("ID3V2 tag size beyond data")
 			}
 			data = data[10+size:]
-			fmt.Println("tag size ", size)
 		} else if bytes.HasPrefix(data, []byte{'T', 'A', 'G'}) {
 			if len(data) < 128 {
 				return errors.New("ID3V1 must has 128 bytes")
@@ -341,7 +340,6 @@ func SplitMp3Frames(data []byte, onFrame func(head *MP3FrameHead, frame []byte))
 		} else {
 			head, err := DecodeMp3Head(data)
 			if err != nil {
-				fmt.Println(err)
 				return err
 			}
 			if head.FrameSize > len(data) {

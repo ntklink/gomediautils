@@ -26,14 +26,25 @@ func NewSampleSizeBox() *SampleSizeBox {
 	}
 }
 
+// entryCount is the number of per sample sizes the box writes out: none for
+// the uniform form, and otherwise one per sample, bounded by the table that
+// is actually there so Size and Encode can never disagree.
+func (stsz *SampleSizeBox) entryCount() int {
+	if stsz.stsz == nil || stsz.stsz.sampleSize != 0 {
+		return 0
+	}
+	n := int(stsz.stsz.sampleCount)
+	if n > len(stsz.stsz.entrySizelist) {
+		n = len(stsz.stsz.entrySizelist)
+	}
+	return n
+}
+
 func (stsz *SampleSizeBox) Size() uint64 {
 	if stsz.stsz == nil {
 		return stsz.box.Size()
-	} else if stsz.stsz.sampleSize == 0 {
-		return stsz.box.Size() + 8 + 4*uint64(stsz.stsz.sampleCount)
-	} else {
-		return stsz.box.Size() + 8
 	}
+	return stsz.box.Size() + 8 + 4*uint64(stsz.entryCount())
 }
 
 func (stsz *SampleSizeBox) Decode(r io.Reader) (offset int, err error) {
@@ -76,13 +87,16 @@ func (stsz *SampleSizeBox) Encode() (int, []byte) {
 	offset, buf := stsz.box.Encode()
 	binary.BigEndian.PutUint32(buf[offset:], stsz.stsz.sampleSize)
 	offset += 4
-	binary.BigEndian.PutUint32(buf[offset:], stsz.stsz.sampleCount)
-	offset += 4
+	n := stsz.entryCount()
 	if stsz.stsz.sampleSize == 0 {
-		for i := 0; i < int(stsz.stsz.sampleCount); i++ {
-			binary.BigEndian.PutUint32(buf[offset:], stsz.stsz.entrySizelist[i])
-			offset += 4
-		}
+		binary.BigEndian.PutUint32(buf[offset:], uint32(n))
+	} else {
+		binary.BigEndian.PutUint32(buf[offset:], stsz.stsz.sampleCount)
+	}
+	offset += 4
+	for i := 0; i < n; i++ {
+		binary.BigEndian.PutUint32(buf[offset:], stsz.stsz.entrySizelist[i])
+		offset += 4
 	}
 	return offset, buf
 }
