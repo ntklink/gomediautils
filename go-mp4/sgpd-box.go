@@ -3,7 +3,6 @@ package mp4
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 )
 
 // SeigSampleGroupEntry - CencSampleEncryptionInformationGroupEntry as defined in
@@ -30,13 +29,19 @@ type SgpdBox struct {
 	SampleGroupEntries           []interface{}
 }
 
-
 func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
-	buf := make([]byte, size-BasicBoxLen)
-	if _, err = io.ReadFull(demuxer.reader, buf); err != nil {
+	track := demuxer.lastTrack()
+	if track == nil {
+		return errNoTrack
+	}
+	buf, err := readBoxPayload(demuxer.reader, uint64(size), BasicBoxLen)
+	if err != nil {
 		return
 	}
 	n := 0
+	if err = checkRemain(buf, n, 8); err != nil {
+		return
+	}
 	versionAndFlags := binary.BigEndian.Uint32(buf[n:])
 	n += 4
 	version := byte(versionAndFlags >> 24)
@@ -45,31 +50,45 @@ func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
 		Version: version,
 		Flags:   versionAndFlags & 0x00ffffff,
 	}
-	b.GroupingType = string(buf[n:n+4])
+	b.GroupingType = string(buf[n : n+4])
 	n += 4
 
 	if b.Version >= 1 {
+		if err = checkRemain(buf, n, 4); err != nil {
+			return
+		}
 		b.DefaultLength = binary.BigEndian.Uint32(buf[n:])
 		n += 4
 	}
 	if b.Version >= 2 {
+		if err = checkRemain(buf, n, 4); err != nil {
+			return
+		}
 		b.DefaultGroupDescriptionIndex = binary.BigEndian.Uint32(buf[n:])
 		n += 4
+	}
+	if err = checkRemain(buf, n, 4); err != nil {
+		return
 	}
 	entryCount := int(binary.BigEndian.Uint32(buf[n:]))
 	n += 4
 
-	track := demuxer.tracks[len(demuxer.tracks)-1]
 	for i := 0; i < entryCount; i++ {
+		if n >= len(buf) {
+			return errBoxTruncated
+		}
 		var descriptionLength = b.DefaultLength
 		if b.Version >= 1 && b.DefaultLength == 0 {
+			if err = checkRemain(buf, n, 4); err != nil {
+				return
+			}
 			descriptionLength = binary.BigEndian.Uint32(buf[n:])
 			n += 4
 			b.DescriptionLengths = append(b.DescriptionLengths, descriptionLength)
 		}
 		var (
 			sgEntry interface{}
-			offset int
+			offset  int
 		)
 		sgEntry, offset, err = decodeSampleGroupEntry(b.GroupingType, descriptionLength, buf[n:])
 		n += offset
@@ -85,7 +104,7 @@ func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
 		b.SampleGroupEntries = append(b.SampleGroupEntries, sgEntry)
 	}
 
- 	return nil
+	return nil
 }
 
 type SampleGroupEntryDecoder func(name string, length uint32, buf []byte) (interface{}, int, error)
@@ -106,6 +125,9 @@ func decodeSampleGroupEntry(name string, length uint32, buf []byte) (interface{}
 func DecodeSeigSampleGroupEntry(name string, length uint32, buf []byte) (interface{}, int, error) {
 	s := &SeigSampleGroupEntry{}
 	n := 0
+	if err := checkRemain(buf, n, 20); err != nil {
+		return nil, 0, err
+	}
 	n += 1 // Reserved
 	byteTwo := buf[n]
 	n += 1
@@ -123,9 +145,15 @@ func DecodeSeigSampleGroupEntry(name string, length uint32, buf []byte) (interfa
 	n += 16
 
 	if s.IsProtected == 1 && s.PerSampleIVSize == 0 {
+		if err := checkRemain(buf, n, 1); err != nil {
+			return nil, 0, err
+		}
 		constantIVSize := int(buf[n])
 		n += 1
-		s.ConstantIV = buf[n:n+constantIVSize]
+		if err := checkRemain(buf, n, constantIVSize); err != nil {
+			return nil, 0, err
+		}
+		s.ConstantIV = buf[n : n+constantIVSize]
 		n += constantIVSize
 	}
 	if length != uint32(s.Size()) {

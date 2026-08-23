@@ -2,8 +2,8 @@ package mp4
 
 import (
 	"encoding/binary"
-	"io"
 	"encoding/hex"
+	"io"
 )
 
 // UUIDs for different DRM systems
@@ -26,16 +26,25 @@ func (pssh *PsshBox) Decode(r io.Reader, size uint32) (offset int, err error) {
 	if offset, err = pssh.Box.Decode(r); err != nil {
 		return
 	}
-	buf := make([]byte, size-12)
-	if _, err = io.ReadFull(r, buf); err != nil {
+	buf, err := readBoxPayload(r, uint64(size), FullBoxLen)
+	if err != nil {
 		return 0, err
 	}
 	n := 0
+	if err = checkRemain(buf, n, 16); err != nil {
+		return 0, err
+	}
 	copy(pssh.SystemID[:], buf[n:n+16])
 	n += 16
 	if pssh.Box.Version > 0 {
+		if err = checkRemain(buf, n, 4); err != nil {
+			return 0, err
+		}
 		kidCount := binary.BigEndian.Uint32(buf[n:])
 		n += 4
+		if err = checkTableSize(kidCount, 16, int64(len(buf)-n)); err != nil {
+			return 0, err
+		}
 		for i := uint32(0); i < kidCount; i++ {
 			var kid [16]byte
 			copy(kid[:], buf[n:n+16])
@@ -43,9 +52,15 @@ func (pssh *PsshBox) Decode(r io.Reader, size uint32) (offset int, err error) {
 			pssh.KIDs = append(pssh.KIDs, kid)
 		}
 	}
+	if err = checkRemain(buf, n, 4); err != nil {
+		return 0, err
+	}
 	dataLen := binary.BigEndian.Uint32(buf[n:])
 	n += 4
-	pssh.Data = buf[n:n+int(dataLen)]
+	if uint64(dataLen) > uint64(len(buf)-n) {
+		return 0, errBoxTruncated
+	}
+	pssh.Data = buf[n : n+int(dataLen)]
 	return
 }
 

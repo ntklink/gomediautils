@@ -1,8 +1,8 @@
 package mp4
 
 import (
-    "encoding/binary"
-    "io"
+	"encoding/binary"
+	"io"
 )
 
 // aligned(8) class TimeToSampleBox extends FullBox(’stts’, version = 0, 0) {
@@ -15,78 +15,88 @@ import (
 // }
 
 type TimeToSampleBox struct {
-    box       *FullBox
-    entryList *movstts
+	box       *FullBox
+	entryList *movstts
 }
 
 func NewTimeToSampleBox() *TimeToSampleBox {
-    return &TimeToSampleBox{
-        box: NewFullBox([4]byte{'s', 't', 't', 's'}, 0),
-    }
+	return &TimeToSampleBox{
+		box: NewFullBox([4]byte{'s', 't', 't', 's'}, 0),
+	}
 }
 
 func (stts *TimeToSampleBox) Size() uint64 {
-    if stts.entryList == nil {
-        return stts.box.Size()
-    } else {
-        return stts.box.Size() + 4 + 8*uint64(stts.entryList.entryCount)
-    }
+	if stts.entryList == nil {
+		return stts.box.Size()
+	} else {
+		return stts.box.Size() + 4 + 8*uint64(stts.entryList.entryCount)
+	}
 }
 
 func (stts *TimeToSampleBox) Decode(r io.Reader) (offset int, err error) {
-    if _, err = stts.box.Decode(r); err != nil {
-        return
-    }
-    entryCountBuf := make([]byte, 4)
-    if _, err = io.ReadFull(r, entryCountBuf); err != nil {
-        return
-    }
-    offset = 8
-    stts.entryList = new(movstts)
-    stts.entryList.entryCount = binary.BigEndian.Uint32(entryCountBuf)
-    stts.entryList.entrys = make([]sttsEntry, stts.entryList.entryCount)
-    buf := make([]byte, stts.entryList.entryCount*8)
-    if _, err = io.ReadFull(r, buf); err != nil {
-        return
-    }
-    idx := 0
-    for i := 0; i < int(stts.entryList.entryCount); i++ {
-        stts.entryList.entrys[i].sampleCount = binary.BigEndian.Uint32(buf[idx:])
-        idx += 4
-        stts.entryList.entrys[i].sampleDelta = binary.BigEndian.Uint32(buf[idx:])
-        idx += 4
-    }
-    offset += idx
-    return
+	if _, err = stts.box.Decode(r); err != nil {
+		return
+	}
+	entryCountBuf := make([]byte, 4)
+	if _, err = io.ReadFull(r, entryCountBuf); err != nil {
+		return
+	}
+	offset = 8
+	stts.entryList = new(movstts)
+	stts.entryList.entryCount = binary.BigEndian.Uint32(entryCountBuf)
+	remain, err := stts.box.tableRemain(4)
+	if err != nil {
+		return
+	}
+	if err = checkTableSize(stts.entryList.entryCount, 8, remain); err != nil {
+		return
+	}
+	stts.entryList.entrys = make([]sttsEntry, stts.entryList.entryCount)
+	buf := make([]byte, int(stts.entryList.entryCount)*8)
+	if _, err = io.ReadFull(r, buf); err != nil {
+		return
+	}
+	idx := 0
+	for i := 0; i < int(stts.entryList.entryCount); i++ {
+		stts.entryList.entrys[i].sampleCount = binary.BigEndian.Uint32(buf[idx:])
+		idx += 4
+		stts.entryList.entrys[i].sampleDelta = binary.BigEndian.Uint32(buf[idx:])
+		idx += 4
+	}
+	offset += idx
+	return
 }
 
 func (stts *TimeToSampleBox) Encode() (int, []byte) {
-    stts.box.Box.Size = stts.Size()
-    offset, buf := stts.box.Encode()
-    binary.BigEndian.PutUint32(buf[offset:], stts.entryList.entryCount)
-    offset += 4
-    for i := 0; i < int(stts.entryList.entryCount); i++ {
-        binary.BigEndian.PutUint32(buf[offset:], stts.entryList.entrys[i].sampleCount)
-        offset += 4
-        binary.BigEndian.PutUint32(buf[offset:], stts.entryList.entrys[i].sampleDelta)
-        offset += 4
-    }
-    return offset, buf
+	stts.box.Box.Size = stts.Size()
+	offset, buf := stts.box.Encode()
+	binary.BigEndian.PutUint32(buf[offset:], stts.entryList.entryCount)
+	offset += 4
+	for i := 0; i < int(stts.entryList.entryCount); i++ {
+		binary.BigEndian.PutUint32(buf[offset:], stts.entryList.entrys[i].sampleCount)
+		offset += 4
+		binary.BigEndian.PutUint32(buf[offset:], stts.entryList.entrys[i].sampleDelta)
+		offset += 4
+	}
+	return offset, buf
 }
 
 func makeStts(stts *movstts) (boxdata []byte) {
-    sttsbox := NewTimeToSampleBox()
-    sttsbox.entryList = stts
-    _, boxdata = sttsbox.Encode()
-    return
+	sttsbox := NewTimeToSampleBox()
+	sttsbox.entryList = stts
+	_, boxdata = sttsbox.Encode()
+	return
 }
 
-func decodeSttsBox(demuxer *MovDemuxer) (err error) {
-    stts := TimeToSampleBox{box: new(FullBox)}
-    if _, err = stts.Decode(demuxer.reader); err != nil {
-        return
-    }
-    track := demuxer.tracks[len(demuxer.tracks)-1]
-    track.stbltable.stts = stts.entryList
-    return
+func decodeSttsBox(demuxer *MovDemuxer, size uint64) (err error) {
+	track, err := demuxer.lastStbl()
+	if err != nil {
+		return err
+	}
+	stts := TimeToSampleBox{box: &FullBox{Box: &BasicBox{Size: size}}}
+	if _, err = stts.Decode(demuxer.reader); err != nil {
+		return
+	}
+	track.stbltable.stts = stts.entryList
+	return
 }

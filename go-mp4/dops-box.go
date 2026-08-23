@@ -76,14 +76,16 @@ func (dops *OpusSpecificBox) Encode() (int, []byte) {
 
 func (dops *OpusSpecificBox) Decode(r io.Reader, size uint32) (offset int, err error) {
 
-	dopsBuf := make([]byte, size-BasicBoxLen)
-	ChannelMappingFamily := 0
-	if size-BasicBoxLen-10 > 0 {
-		ChannelMappingFamily = int(size - BasicBoxLen - 10)
-	}
-
-	if _, err = io.ReadFull(r, dopsBuf); err != nil {
+	dopsBuf, err := readBoxPayload(r, uint64(size), BasicBoxLen)
+	if err != nil {
 		return
+	}
+	if err = checkRemain(dopsBuf, 0, 10); err != nil {
+		return
+	}
+	ChannelMappingFamily := 0
+	if len(dopsBuf) > 12 {
+		ChannelMappingFamily = len(dopsBuf) - 10
 	}
 
 	dops.Version = dopsBuf[0]

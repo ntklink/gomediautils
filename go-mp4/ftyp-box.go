@@ -46,14 +46,17 @@ func (ftyp *FileTypeBox) Size() uint64 {
 }
 
 func (ftyp *FileTypeBox) decode(r io.Reader, size uint32) (int, error) {
-	buf := make([]byte, size-BasicBoxLen)
-	if n, err := io.ReadFull(r, buf); err != nil {
-		return n, err
+	buf, err := readBoxPayload(r, uint64(size), BasicBoxLen)
+	if err != nil {
+		return 0, err
+	}
+	if err = checkRemain(buf, 0, 8); err != nil {
+		return 0, err
 	}
 	ftyp.Major_brand = binary.LittleEndian.Uint32(buf[0:])
 	ftyp.Minor_version = binary.BigEndian.Uint32(buf[4:])
 	n := 8
-	for ; BasicBoxLen+n < int(size); n += 4 {
+	for ; n+4 <= len(buf); n += 4 {
 		ftyp.Compatible_brands = append(ftyp.Compatible_brands, binary.LittleEndian.Uint32(buf[n:]))
 	}
 	return n, nil

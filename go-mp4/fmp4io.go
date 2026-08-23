@@ -27,7 +27,13 @@ func (fws *fmp4WriterSeeker) Write(p []byte) (n int, err error) {
 		fws.offset += len(p)
 		return len(p), nil
 	}
-	tmp := make([]byte, len(fws.buffer), cap(fws.buffer)+len(p)*2)
+	// grow geometrically: a linear `cap + 2*len(p)` growth makes every write
+	// past the initial capacity reallocate and copy the whole fragment
+	newCap := cap(fws.buffer) * 2
+	if need := fws.offset + len(p); newCap < need {
+		newCap = need
+	}
+	tmp := make([]byte, len(fws.buffer), newCap)
 	copy(tmp, fws.buffer)
 	if len(fws.buffer) < fws.offset+len(p) {
 		tmp = tmp[:fws.offset+len(p)]

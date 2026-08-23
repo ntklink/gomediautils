@@ -50,8 +50,15 @@ func (stco *ChunkOffsetBox) Decode(r io.Reader) (offset int, err error) {
 	offset = 8
 	stco.stco = new(movstco)
 	stco.stco.entryCount = binary.BigEndian.Uint32(tmp)
+	remain, err := stco.box.tableRemain(4)
+	if err != nil {
+		return
+	}
+	if err = checkTableSize(stco.stco.entryCount, 4, remain); err != nil {
+		return
+	}
 	stco.stco.chunkOffsetlist = make([]uint64, stco.stco.entryCount)
-	buf := make([]byte, stco.stco.entryCount*4)
+	buf := make([]byte, int(stco.stco.entryCount)*4)
 	if _, err = io.ReadFull(r, buf); err != nil {
 		return
 	}
@@ -106,8 +113,15 @@ func (co64 *ChunkLargeOffsetBox) Decode(r io.Reader) (offset int, err error) {
 	offset = 8
 	co64.stco = new(movstco)
 	co64.stco.entryCount = binary.BigEndian.Uint32(tmp)
+	remain, err := co64.box.tableRemain(4)
+	if err != nil {
+		return
+	}
+	if err = checkTableSize(co64.stco.entryCount, 8, remain); err != nil {
+		return
+	}
 	co64.stco.chunkOffsetlist = make([]uint64, co64.stco.entryCount)
-	buf := make([]byte, co64.stco.entryCount*8)
+	buf := make([]byte, int(co64.stco.entryCount)*8)
 	if _, err = io.ReadFull(r, buf); err != nil {
 		return
 	}
@@ -146,22 +160,28 @@ func makeStco(stco *movstco) (boxdata []byte) {
 	return
 }
 
-func decodeStcoBox(demuxer *MovDemuxer) (err error) {
-	stco := ChunkOffsetBox{box: new(FullBox)}
+func decodeStcoBox(demuxer *MovDemuxer, size uint64) (err error) {
+	track, err := demuxer.lastStbl()
+	if err != nil {
+		return err
+	}
+	stco := ChunkOffsetBox{box: &FullBox{Box: &BasicBox{Size: size}}}
 	if _, err = stco.Decode(demuxer.reader); err != nil {
 		return
 	}
-	track := demuxer.tracks[len(demuxer.tracks)-1]
 	track.stbltable.stco = stco.stco
 	return
 }
 
-func decodeCo64Box(demuxer *MovDemuxer) (err error) {
-	co64 := ChunkLargeOffsetBox{box: new(FullBox)}
+func decodeCo64Box(demuxer *MovDemuxer, size uint64) (err error) {
+	track, err := demuxer.lastStbl()
+	if err != nil {
+		return err
+	}
+	co64 := ChunkLargeOffsetBox{box: &FullBox{Box: &BasicBox{Size: size}}}
 	if _, err = co64.Decode(demuxer.reader); err != nil {
 		return
 	}
-	track := demuxer.tracks[len(demuxer.tracks)-1]
 	track.stbltable.stco = co64.stco
 	return
 }

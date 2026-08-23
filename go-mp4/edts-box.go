@@ -67,13 +67,18 @@ func (elst *EditListBox) Decode(r io.Reader) (offset int, err error) {
 	}
 	entryCount := binary.BigEndian.Uint32(entryCountBuf)
 	offset += 4
-	boxsize := uint32(0)
-	if elst.box.Version == 0 {
-		boxsize = 12 * entryCount
-	} else {
-		boxsize = 20 * entryCount
+	entrySize := 12
+	if elst.box.Version != 0 {
+		entrySize = 20
 	}
-	buf := make([]byte, boxsize)
+	remain, err := elst.box.tableRemain(4)
+	if err != nil {
+		return 0, err
+	}
+	if err = checkTableSize(entryCount, entrySize, remain); err != nil {
+		return 0, err
+	}
+	buf := make([]byte, int(entryCount)*entrySize)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return 0, err
 	}
@@ -149,9 +154,12 @@ func makeEdtsBox(track *mp4track) []byte {
 	return edtsbox
 }
 
-func decodeElstBox(demuxer *MovDemuxer) (err error) {
-	track := demuxer.tracks[len(demuxer.tracks)-1]
-	elst := &EditListBox{box: new(FullBox)}
+func decodeElstBox(demuxer *MovDemuxer, size uint64) (err error) {
+	track := demuxer.lastTrack()
+	if track == nil {
+		return errNoTrack
+	}
+	elst := &EditListBox{box: &FullBox{Box: &BasicBox{Size: size}}}
 	if _, err = elst.Decode(demuxer.reader); err != nil {
 		return
 	}

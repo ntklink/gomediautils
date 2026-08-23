@@ -54,8 +54,15 @@ func (stss *SyncSampleBox) Decode(r io.Reader) (offset int, err error) {
 	}
 	offset = 8
 	entry_count := binary.BigEndian.Uint32(tmp[:])
+	remain, err := stss.box.tableRemain(4)
+	if err != nil {
+		return
+	}
+	if err = checkTableSize(entry_count, 4, remain); err != nil {
+		return
+	}
 	stss.entrys = make([]uint32, entry_count)
-	buf := make([]byte, entry_count*4)
+	buf := make([]byte, int(entry_count)*4)
 	if _, err = io.ReadFull(r, buf); err != nil {
 		return
 	}
@@ -68,12 +75,15 @@ func (stss *SyncSampleBox) Decode(r io.Reader) (offset int, err error) {
 	return
 }
 
-func decodeStssBox(demuxer *MovDemuxer) (err error) {
-	stss := SyncSampleBox{box: new(FullBox)}
+func decodeStssBox(demuxer *MovDemuxer, size uint64) (err error) {
+	track, err := demuxer.lastStbl()
+	if err != nil {
+		return err
+	}
+	stss := SyncSampleBox{box: &FullBox{Box: &BasicBox{Size: size}}}
 	if _, err = stss.Decode(demuxer.reader); err != nil {
 		return
 	}
-	track := demuxer.tracks[len(demuxer.tracks)-1]
 	track.stbltable.stss = &movstss{
 		sampleNumber: stss.entrys,
 	}
