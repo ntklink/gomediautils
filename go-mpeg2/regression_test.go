@@ -13,7 +13,7 @@ func h264Nalu(typ byte, n int, firstSlice bool) []byte {
 	} else {
 		b = append(b, 0x00)
 	}
-	for i := 0; i < n; i++ {
+	for range n {
 		b = append(b, byte(rand.Intn(250))+2)
 	}
 	return b
@@ -79,8 +79,8 @@ func BenchmarkTSDemuxLargeFrames(b *testing.B) {
 	}
 	data := ts.Bytes()
 	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		d := NewTSDemuxer()
 		d.OnFrame = func(cid TS_STREAM_TYPE, f []byte, pts, dts uint64) {}
 		if err := d.Input(bytes.NewReader(data)); err != nil {
