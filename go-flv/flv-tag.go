@@ -33,104 +33,113 @@ const FLVTAG_SIZE uint32 = 11
 //  ------------------------------------------------------------------------
 
 type FlvTag struct {
-    TagType           uint8
-    DataSize          uint32
-    Timestamp         uint32
-    TimestampExtended uint8
-    StreamID          uint32
+	TagType           uint8
+	DataSize          uint32
+	Timestamp         uint32
+	TimestampExtended uint8
+	StreamID          uint32
 }
 
 func (ftag FlvTag) Encode() []byte {
-    tag := make([]byte, 11)
-    tag[0] = ftag.TagType
-    PutUint24(tag[1:], ftag.DataSize)
-    PutUint24(tag[4:], ftag.Timestamp)
-    tag[7] = ftag.TimestampExtended
-    PutUint24(tag[8:], ftag.StreamID)
-    return tag
+	return ftag.appendTo(make([]byte, 0, FLVTAG_SIZE))
+}
+
+// appendTo appends the 11-byte tag header to dst.
+func (ftag FlvTag) appendTo(dst []byte) []byte {
+	return append(dst,
+		ftag.TagType,
+		byte(ftag.DataSize>>16), byte(ftag.DataSize>>8), byte(ftag.DataSize),
+		byte(ftag.Timestamp>>16), byte(ftag.Timestamp>>8), byte(ftag.Timestamp),
+		ftag.TimestampExtended,
+		byte(ftag.StreamID>>16), byte(ftag.StreamID>>8), byte(ftag.StreamID))
 }
 
 func (ftag *FlvTag) Decode(data []byte) {
-    ftag.TagType = data[0] & 0x1F
-    ftag.DataSize = GetUint24(data[1:])
-    ftag.Timestamp = GetUint24(data[4:])
-    ftag.TimestampExtended = data[7]
-    ftag.StreamID = GetUint24(data[8:])
+	ftag.TagType = data[0] & 0x1F
+	ftag.DataSize = GetUint24(data[1:])
+	ftag.Timestamp = GetUint24(data[4:])
+	ftag.TimestampExtended = data[7]
+	ftag.StreamID = GetUint24(data[8:])
 }
 
-//  Video Tag
-//  VideoTagHeader
-//  ------------------------------------------------------------------------
-//  Field                   type                     Comment
-//  ------------------------------------------------------------------------
-//  Frame Type              UB[4]              Type of video frame. The following values are defined:
-//                                             1 = key frame (for AVC, a seekable frame)
-//                                             2 = inter frame (for AVC, a non-seekable frame)
-//                                             3 = disposable inter frame (H.263 only)
-//                                             4 = generated key frame (reserved for server use only)
-//                                             5 = video info/command frame
+// Video Tag
+// VideoTagHeader
+// ------------------------------------------------------------------------
+// Field                   type                     Comment
+// ------------------------------------------------------------------------
+// Frame Type              UB[4]              Type of video frame. The following values are defined:
 //
-//  CodecID                 UB[4]              Codec Identifier. The following values are defined:
-//                                             2 = Sorenson H.263
-//                                             3 = Screen video
-//                                             4 = On2 VP6
-//                                             5 = On2 VP6 with alpha channel 6 = Screen video version 2
-//                                             7 = AVC
+//	1 = key frame (for AVC, a seekable frame)
+//	2 = inter frame (for AVC, a non-seekable frame)
+//	3 = disposable inter frame (H.263 only)
+//	4 = generated key frame (reserved for server use only)
+//	5 = video info/command frame
 //
-//  AVCPacketType          IF CodecID == 7     The following values are defined:
-//                              UI8               0 = AVC sequence header
-//                                                1 = AVC NALU
-//                                                2 = AVC end of sequence (lower level NALU sequence ender is not required or supported)
+// CodecID                 UB[4]              Codec Identifier. The following values are defined:
 //
-//  CompositionTime        IF CodecID == 7     IF AVCPacketType == 1
-//                              SI24                    Composition time offset
-//                                               ELSE
-//                                                    0
-//  ------------------------------------------------------------------------
+//	2 = Sorenson H.263
+//	3 = Screen video
+//	4 = On2 VP6
+//	5 = On2 VP6 with alpha channel 6 = Screen video version 2
+//	7 = AVC
+//
+// AVCPacketType          IF CodecID == 7     The following values are defined:
+//
+//	UI8               0 = AVC sequence header
+//	                  1 = AVC NALU
+//	                  2 = AVC end of sequence (lower level NALU sequence ender is not required or supported)
+//
+// CompositionTime        IF CodecID == 7     IF AVCPacketType == 1
+//
+//	SI24                    Composition time offset
+//	                 ELSE
+//	                      0
+//
+// ------------------------------------------------------------------------
 type VideoTag struct {
-    FrameType       uint8
-    CodecId         uint8
-    AVCPacketType   uint8
-    CompositionTime int32
+	FrameType       uint8
+	CodecId         uint8
+	AVCPacketType   uint8
+	CompositionTime int32
 }
 
 func (vtag VideoTag) Encode() (tag []byte) {
-    if vtag.CodecId == uint8(FLV_AVC) || vtag.CodecId == uint8(FLV_HEVC) {
-        tag = make([]byte, 5)
-        tag[1] = vtag.AVCPacketType
-        PutUint24(tag[2:], uint32(vtag.CompositionTime))
-    } else {
-        tag = make([]byte, 1)
-    }
-    tag[0] = (vtag.FrameType << 4) | (vtag.CodecId & 0x0F)
-    return
+	if vtag.CodecId == uint8(FLV_AVC) || vtag.CodecId == uint8(FLV_HEVC) {
+		tag = make([]byte, 5)
+		tag[1] = vtag.AVCPacketType
+		PutUint24(tag[2:], uint32(vtag.CompositionTime))
+	} else {
+		tag = make([]byte, 1)
+	}
+	tag[0] = (vtag.FrameType << 4) | (vtag.CodecId & 0x0F)
+	return
 }
 
 // 外部已经确保len(data) >= 5
 func (vtag *VideoTag) Decode(data []byte) {
-    isExHeader := data[0] & 0x80
-    if isExHeader != 0 {
-        // enhanced flv
-        vtag.FrameType = (data[0] >> 4) & 0x07
-        vtag.AVCPacketType = data[0] & 0x0F
+	isExHeader := data[0] & 0x80
+	if isExHeader != 0 {
+		// enhanced flv
+		vtag.FrameType = (data[0] >> 4) & 0x07
+		vtag.AVCPacketType = data[0] & 0x0F
 
-        // TODO av1和VP9
-        if data[1] == 'h' && data[2] == 'v' && data[3] == 'c' && data[4] == '1' {
-            // hevc
-            vtag.CodecId = uint8(FLV_HEVC)
+		// TODO av1和VP9
+		if data[1] == 'h' && data[2] == 'v' && data[3] == 'c' && data[4] == '1' {
+			// hevc
+			vtag.CodecId = uint8(FLV_HEVC)
 
-            if vtag.AVCPacketType == PacketTypeCodedFrames {
-                vtag.CompositionTime = int32(GetUint24(data[5:]))
-            }
-        }
-    } else {
-        vtag.FrameType = data[0] >> 4
-        vtag.CodecId = data[0] & 0x0F
-        if vtag.CodecId == uint8(FLV_AVC) || vtag.CodecId == uint8(FLV_HEVC) {
-            vtag.AVCPacketType = data[1]
-            vtag.CompositionTime = int32(GetUint24(data[2:]))
-        }
-    }
+			if vtag.AVCPacketType == PacketTypeCodedFrames {
+				vtag.CompositionTime = int32(GetUint24(data[5:]))
+			}
+		}
+	} else {
+		vtag.FrameType = data[0] >> 4
+		vtag.CodecId = data[0] & 0x0F
+		if vtag.CodecId == uint8(FLV_AVC) || vtag.CodecId == uint8(FLV_HEVC) {
+			vtag.AVCPacketType = data[1]
+			vtag.CompositionTime = int32(GetUint24(data[2:]))
+		}
+	}
 }
 
 //  Audio Tag
@@ -174,37 +183,37 @@ func (vtag *VideoTag) Decode(data []byte) {
 //  ------------------------------------------------------------------------
 
 type AudioTag struct {
-    SoundFormat   uint8
-    SoundRate     uint8
-    SoundSize     uint8
-    SoundType     uint8
-    AACPacketType uint8
+	SoundFormat   uint8
+	SoundRate     uint8
+	SoundSize     uint8
+	SoundType     uint8
+	AACPacketType uint8
 }
 
 func (atag AudioTag) Encode() (tag []byte) {
-    if atag.SoundFormat == 10 {
-        tag = make([]byte, 2)
-        tag[1] = atag.AACPacketType
-    } else {
-        tag = make([]byte, 1)
-    }
-    tag[0] = atag.SoundFormat<<4 | atag.SoundRate<<2 | atag.SoundSize<<1 | atag.SoundType
-    return
+	if atag.SoundFormat == 10 {
+		tag = make([]byte, 2)
+		tag[1] = atag.AACPacketType
+	} else {
+		tag = make([]byte, 1)
+	}
+	tag[0] = atag.SoundFormat<<4 | atag.SoundRate<<2 | atag.SoundSize<<1 | atag.SoundType
+	return
 }
 
 func (atag *AudioTag) Decode(data []byte) error {
-    if len(data) < 1 {
-        return errors.New("audio tag header size < 1 ")
-    }
-    atag.SoundFormat = data[0] >> 4
-    atag.SoundRate = (data[0] >> 2) & 0x03
-    atag.SoundSize = (data[0] >> 1) & 0x01
-    atag.SoundType = data[0] & 0x01
-    if atag.SoundFormat == 10 {
-        if len(data) < 2 {
-            return errors.New("aac audio tag header size < 2")
-        }
-        atag.AACPacketType = data[1]
-    }
-    return nil
+	if len(data) < 1 {
+		return errors.New("audio tag header size < 1 ")
+	}
+	atag.SoundFormat = data[0] >> 4
+	atag.SoundRate = (data[0] >> 2) & 0x03
+	atag.SoundSize = (data[0] >> 1) & 0x01
+	atag.SoundType = data[0] & 0x01
+	if atag.SoundFormat == 10 {
+		if len(data) < 2 {
+			return errors.New("aac audio tag header size < 2")
+		}
+		atag.AACPacketType = data[1]
+	}
+	return nil
 }

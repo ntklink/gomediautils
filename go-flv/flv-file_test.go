@@ -1,20 +1,46 @@
 package flv
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/yapingcat/gomedia/go-codec"
 )
 
+// openSample opens a sample media file that is not part of the repository.
+// The test is skipped when the file is absent so that `go test ./...` works on
+// a clean checkout.
+func openSample(t *testing.T, name string) *os.File {
+	t.Helper()
+	fd, err := os.Open(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("sample file %s not present", name)
+		}
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { fd.Close() })
+	return fd
+}
+
+// createOutput creates a scratch output file inside the test's temp dir.
+func createOutput(t *testing.T, name string) *os.File {
+	t.Helper()
+	fd, err := os.Create(filepath.Join(t.TempDir(), name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { fd.Close() })
+	return fd
+}
+
 func TestFlvReader_Input(t *testing.T) {
 	t.Run("test_1", func(t *testing.T) {
-		videoFile, _ := os.OpenFile("v.h264", os.O_CREATE|os.O_RDWR, 0666)
-		defer videoFile.Close()
-		audioFile, _ := os.OpenFile("a.aac", os.O_CREATE|os.O_RDWR, 0666)
-		defer audioFile.Close()
+		fd := openSample(t, "source.200kbps.768x320.flv")
+		videoFile := createOutput(t, "v.h264")
+		audioFile := createOutput(t, "a.aac")
 		f := CreateFlvReader()
 		f.OnFrame = func(cid codec.CodecID, frame []byte, pts, dts uint32) {
 			if cid == codec.CODECID_VIDEO_H264 {
@@ -23,47 +49,43 @@ func TestFlvReader_Input(t *testing.T) {
 				audioFile.Write(frame)
 			}
 		}
-		fd, _ := os.Open("source.200kbps.768x320.flv")
-		defer fd.Close()
 		cache := make([]byte, 4096)
 		for {
 			n, err := fd.Read(cache)
 			if err != nil {
-				fmt.Println(err)
 				break
 			}
-			f.Input(cache[0:n])
+			if err := f.Input(cache[0:n]); err != nil {
+				t.Fatalf("FlvReader.Input() error = %v", err)
+			}
 		}
-
-		// content, _ := ioutil.ReadAll(fd)
-		// if err := f.Input(content); err != nil {
-		// 	t.Errorf("FlvReader.Input() error = %v", err)
-		// }
 	})
 }
 
 func TestFlvWriter_Write(t *testing.T) {
-
 	t.Run("test_2", func(t *testing.T) {
-		newflv, _ := os.OpenFile("new.flv", os.O_CREATE|os.O_RDWR, 0666)
-		defer newflv.Close()
+		fd := openSample(t, "source.200kbps.768x320.flv")
+		newflv := createOutput(t, "new.flv")
 		wf := CreateFlvWriter(newflv)
-		wf.WriteFlvHeader()
+		if err := wf.WriteFlvHeader(); err != nil {
+			t.Fatal(err)
+		}
 		rf := CreateFlvReader()
 		rf.OnFrame = func(cid codec.CodecID, frame []byte, pts, dts uint32) {
 			if cid == codec.CODECID_VIDEO_H264 {
 				if err := wf.WriteH264(frame, pts, dts); err != nil {
-					fmt.Println(err)
+					t.Errorf("WriteH264() error = %v", err)
 				}
 			} else if cid == codec.CODECID_AUDIO_AAC {
 				if err := wf.WriteAAC(frame, pts, dts); err != nil {
-					fmt.Println(err)
+					t.Errorf("WriteAAC() error = %v", err)
 				}
 			}
 		}
-		fd, _ := os.Open("source.200kbps.768x320.flv")
-		defer fd.Close()
-		content, _ := ioutil.ReadAll(fd)
+		content, err := ioutil.ReadAll(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := rf.Input(content); err != nil {
 			t.Errorf("FlvReader.Input() error = %v", err)
 		}
@@ -71,26 +93,22 @@ func TestFlvWriter_Write(t *testing.T) {
 }
 
 func TestFlvWriter_WriteHevc(t *testing.T) {
-
 	t.Run("test_3", func(t *testing.T) {
-		newflv, _ := os.OpenFile("h265.flv", os.O_CREATE|os.O_RDWR, 0666)
-		defer newflv.Close()
+		rawh265 := openSample(t, "1.h265")
+		newflv := createOutput(t, "h265.flv")
 		wf := CreateFlvWriter(newflv)
-		wf.WriteFlvHeader()
+		if err := wf.WriteFlvHeader(); err != nil {
+			t.Fatal(err)
+		}
 		var pts uint32 = 0
 		var dts uint32 = 0
-		rawh265, err := os.Open("1.h265")
+		buf, err := ioutil.ReadAll(rawh265)
 		if err != nil {
-			fmt.Println(err)
-			return
+			t.Fatal(err)
 		}
-		defer rawh265.Close()
-		buf, _ := ioutil.ReadAll(rawh265)
 		codec.SplitFrameWithStartCode(buf, func(nalu []byte) bool {
-			fmt.Printf("%x %x %x %x %x\n", nalu[0], nalu[1], nalu[2], nalu[3], nalu[4])
-			fmt.Printf("nalu size %d\n", len(nalu))
 			if err := wf.WriteH265(nalu, pts, dts); err != nil {
-				fmt.Println(err)
+				t.Errorf("WriteH265() error = %v", err)
 			}
 			pts += 40
 			dts += 40
@@ -100,19 +118,19 @@ func TestFlvWriter_WriteHevc(t *testing.T) {
 }
 
 func TestFlvReadH265(t *testing.T) {
-
 	t.Run("test_4", func(t *testing.T) {
-		videoFile, _ := os.OpenFile("v2.h265", os.O_CREATE|os.O_RDWR, 0666)
-		defer videoFile.Close()
+		fd := openSample(t, "l.flv")
+		videoFile := createOutput(t, "v2.h265")
 		f := CreateFlvReader()
 		f.OnFrame = func(cid codec.CodecID, frame []byte, pts, dts uint32) {
 			if cid == codec.CODECID_VIDEO_H265 {
 				videoFile.Write(frame)
 			}
 		}
-		fd, _ := os.Open("l.flv")
-		defer fd.Close()
-		content, _ := ioutil.ReadAll(fd)
+		content, err := ioutil.ReadAll(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := f.Input(content); err != nil {
 			t.Errorf("FlvReader.Input() error = %v", err)
 		}
