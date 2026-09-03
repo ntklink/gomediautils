@@ -160,9 +160,9 @@ func (tkhd *TrackHeaderBox) Encode() (int, []byte) {
 	return offset + 4, buf
 }
 
-func makeTkhdBox(track *mp4track) []byte {
+func makeTkhdBox(track *mp4track, duration uint32) []byte {
 	tkhd := NewTrackHeaderBox()
-	tkhd.Duration = uint64(track.mediaDuration())
+	tkhd.Duration = uint64(duration)
 	tkhd.Track_ID = track.trackId
 	//  flags is a 24-bit integer with flags; the following values are defined:
 	// Track_enabled: Indicates that the track is enabled. Flag value is 0x000001. A disabled track (the low bit is zero) is treated as if it were not present.

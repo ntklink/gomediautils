@@ -2,8 +2,14 @@ package mp4
 
 func makeTrak(track *mp4track, movflag MP4_FLAG) ([]byte, error) {
 
+	// a fragmented moov describes no samples: its sample tables are empty and
+	// so are its durations. The length of the presentation lives in mehd,
+	// which is the only box a player may read without adding the fragments to
+	// it a second time
+	duration := track.mediaDuration()
 	edts := []byte{}
 	if movflag.isDash() || movflag.isFragment() {
+		duration = 0
 		track.makeEmptyStblTable()
 	} else {
 		if len(track.samplelist) > 0 {
@@ -12,8 +18,8 @@ func makeTrak(track *mp4track, movflag MP4_FLAG) ([]byte, error) {
 		}
 	}
 
-	tkhd := makeTkhdBox(track)
-	mdia, err := makeMdiaBox(track)
+	tkhd := makeTkhdBox(track, duration)
+	mdia, err := makeMdiaBox(track, duration)
 	if err != nil {
 		return nil, err
 	}

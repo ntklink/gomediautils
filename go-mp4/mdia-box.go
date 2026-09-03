@@ -1,11 +1,11 @@
 package mp4
 
-func makeMdiaBox(track *mp4track) ([]byte, error) {
+func makeMdiaBox(track *mp4track, duration uint32) ([]byte, error) {
 	handlerType, err := getHandlerType(track.cid)
 	if err != nil {
 		return nil, err
 	}
-	mdhdbox := makeMdhdBox(track.mediaDuration())
+	mdhdbox := makeMdhdBox(duration)
 	hdlrbox := makeHdlrBox(handlerType)
 	minfbox, err := makeMinfBox(track)
 	if err != nil {

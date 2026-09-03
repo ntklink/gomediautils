@@ -523,18 +523,56 @@ func TestDurationHintReachesHeadOfUnseekableFile(t *testing.T) {
 	if moovs != 1 {
 		t.Fatalf("got %d moov boxes, want 1: a head that cannot be patched must not be appended again", moovs)
 	}
-	movie, tkhd, mdhd := moovDurations(t, findBox(boxes, "moov").data)
-	if movie != hint || tkhd[1] != hint || mdhd[1] != hint {
-		t.Fatalf("durations mvhd=%d tkhd=%d mdhd=%d, want %d for all", movie, tkhd[1], mdhd[1], hint)
+	moov := findBox(boxes, "moov").data
+	got, ok := mehdDuration(t, moov)
+	if !ok {
+		t.Fatal("no mehd box: nothing states the length of the presentation")
+	}
+	if got != hint {
+		t.Fatalf("mehd duration %d, want %d", got, hint)
+	}
+	// a player adds the fragments to whatever the moov says it already
+	// describes, so every duration in the moov itself has to be zero
+	movie, tkhd, mdhd := moovDurations(t, moov)
+	if movie != 0 || tkhd[1] != 0 || mdhd[1] != 0 {
+		t.Fatalf("moov durations mvhd=%d tkhd=%d mdhd=%d, want 0 for all: a non zero one is added to the fragments and doubles the reported length", movie, tkhd[1], mdhd[1])
 	}
 }
 
 func TestDurationHintYieldsToRealDurationWhenSeekable(t *testing.T) {
 	buf := muxVideoFragments(t, 10, 5, WithDurationHint(60000))
-	movie, tkhd, mdhd := moovDurations(t, findBox(topLevelBoxes(t, buf), "moov").data)
+	moov := findBox(topLevelBoxes(t, buf), "moov").data
 	// a writer that seeks gets the length WriteTrailer measured, not the hint
 	const want = 400
-	if movie != want || tkhd[1] != want || mdhd[1] != want {
-		t.Fatalf("durations mvhd=%d tkhd=%d mdhd=%d, want %d for all", movie, tkhd[1], mdhd[1], want)
+	got, ok := mehdDuration(t, moov)
+	if !ok {
+		t.Fatal("no mehd box")
 	}
+	if got != want {
+		t.Fatalf("mehd duration %d, want the measured %d", got, want)
+	}
+}
+
+// mehdDuration reads the length the moov states for the whole presentation,
+// fragments included. It reports false when the box is absent.
+func mehdDuration(t *testing.T, moov []byte) (uint64, bool) {
+	t.Helper()
+	var got uint64
+	var found bool
+	err := walkBoxes(moov[BasicBoxLen:], func(typ string, box []byte) error {
+		if typ != "mvex" {
+			return nil
+		}
+		return walkBoxes(box[BasicBoxLen:], func(typ string, box []byte) error {
+			if typ == "mehd" {
+				got = binary.BigEndian.Uint64(box[FullBoxLen:])
+				found = true
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got, found
 }
