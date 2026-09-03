@@ -188,11 +188,22 @@ func makeTfhdBox(track *mp4track, offset uint64) []byte {
 	tfFlags |= TF_FLAG_DEAAULT_BASE_IS_MOOF
 	tfhd := NewTrackFragmentHeaderBox(track.trackId)
 	tfhd.BaseDataOffset = offset
-	if len(track.samplelist) > 1 {
+	switch {
+	case len(track.samplelist) > 1:
 		tfhd.DefaultSampleDuration = uint32(track.samplelist[1].dts - track.samplelist[0].dts)
-	} else if len(track.samplelist) == 1 && len(track.fragments) > 0 {
+	case len(track.samplelist) == 1 && len(track.fragments) > 0:
 		tfhd.DefaultSampleDuration = uint32(track.samplelist[0].dts - track.fragments[len(track.fragments)-1].lastDts)
-	} else {
+	case len(track.samplelist) == 1:
+		// a lone sample in the very first fragment: the sample waiting in the
+		// cache, if any, is the only hint of how long it lasts. This must not
+		// set duration_is_empty, which tells a player the fragment holds no
+		// samples at all; android refuses to play such a file.
+		if track.lastSample != nil && track.lastSample.dts > track.samplelist[0].dts {
+			tfhd.DefaultSampleDuration = uint32(track.lastSample.dts - track.samplelist[0].dts)
+		} else {
+			tfhd.DefaultSampleDuration = track.defaultDuration
+		}
+	default:
 		tfhd.DefaultSampleDuration = 0
 		tfFlags |= TF_FLAG_DURATION_IS_EMPTY
 	}

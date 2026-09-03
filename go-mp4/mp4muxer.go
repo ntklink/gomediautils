@@ -18,8 +18,14 @@ const (
 
 // defaultFragmentDuration is the fragment length used for streams without a
 // video track, in track timescale units (tracks default to a 1000 timescale).
+//
+// defaultSidxReserve is how many fragments the segment index at the head of a
+// MP4_FLAG_FRAGMENT file can point at before neighbouring fragments share an
+// entry; 2048 fragments of two seconds cover more than an hour.
 const (
 	defaultFragmentDuration uint32 = 1000
+	defaultSidxReserve      uint32 = 2048
+	maxSidxReserve          uint32 = 0xFFFF // reference_count is 16 bits
 )
 
 func (f MP4_FLAG) has(ff MP4_FLAG) bool {
@@ -44,6 +50,8 @@ type Movmuxer struct {
 	movFlag        MP4_FLAG
 	onNewFragment  OnFragment
 	fragDuration   uint32
+	sidxReserve    uint32
+	header         fmp4Header
 }
 
 type MuxerOption func(muxer *Movmuxer)
@@ -63,6 +71,23 @@ func WithFragmentDuration(duration uint32) MuxerOption {
 	}
 }
 
+// WithSidxReserve sets how many fragments the segment index (sidx) written at
+// the head of a MP4_FLAG_FRAGMENT file can reference. Room for it is reserved
+// in front of the first fragment and filled in by WriteTrailer, when the
+// fragment sizes are known; a file with more fragments than that merges
+// neighbouring fragments into one entry, so seeking gets coarser but stays
+// correct. Android players seek a fragmented file through this index only,
+// so 0, which writes no index, leaves them unable to seek. Dash output is not
+// affected: it carries a sidx per segment.
+func WithSidxReserve(fragments uint32) MuxerOption {
+	return func(muxer *Movmuxer) {
+		if fragments > maxSidxReserve {
+			fragments = maxSidxReserve
+		}
+		muxer.sidxReserve = fragments
+	}
+}
+
 func CreateMp4Muxer(w io.WriteSeeker, options ...MuxerOption) (*Movmuxer, error) {
 	muxer := &Movmuxer{
 		writer:         w,
@@ -71,6 +96,7 @@ func CreateMp4Muxer(w io.WriteSeeker, options ...MuxerOption) (*Movmuxer, error)
 		tracks:         make(map[uint32]*mp4track),
 		movFlag:        MP4_FLAG_KEYFRAME,
 		fragDuration:   defaultFragmentDuration,
+		sidxReserve:    defaultSidxReserve,
 	}
 
 	for _, opt := range options {
@@ -264,6 +290,9 @@ func (muxer *Movmuxer) WriteTrailer() (err error) {
 				muxer.onNewFragment(track.duration, track.startPts, track.startDts)
 			}
 		}
+		if err = muxer.finishFileHeader(); err != nil {
+			return err
+		}
 		return muxer.writeMfra()
 	default:
 		if err = muxer.reWriteMdatSize(); err != nil {
@@ -335,7 +364,16 @@ func (muxer *Movmuxer) reWriteMdatSize() (err error) {
 	return
 }
 
-func (muxer *Movmuxer) writeMoov(w io.Writer) (err error) {
+func (muxer *Movmuxer) writeMoov(w io.Writer) error {
+	moov, err := muxer.makeMoov()
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(moov)
+	return err
+}
+
+func (muxer *Movmuxer) makeMoov() ([]byte, error) {
 	var mvhd []byte
 	var mvex []byte
 	if muxer.movFlag.isDash() || muxer.movFlag.isFragment() {
@@ -355,7 +393,7 @@ func (muxer *Movmuxer) writeMoov(w io.Writer) (err error) {
 	for i := uint32(1); i < muxer.nextTrackId; i++ {
 		trak, err := makeTrak(muxer.tracks[i], muxer.movFlag)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		traks[i-1] = trak
 		moovsize += len(trak)
@@ -371,8 +409,7 @@ func (muxer *Movmuxer) writeMoov(w io.Writer) (err error) {
 		offset += len(trak)
 	}
 	copy(moovBox[offset:], mvex)
-	_, err = w.Write(moovBox)
-	return
+	return moovBox, nil
 }
 
 func (muxer *Movmuxer) writeMfra() (err error) {
@@ -436,16 +473,11 @@ func (muxer *Movmuxer) FlushFragment() (err error) {
 
 func (muxer *Movmuxer) flushFragment() (err error) {
 
-	if muxer.movFlag.isFragment() {
-		if muxer.nextFragmentId == 0 { //first fragment ,write moov
-			ftypBox := makeFtypBox(mov_tag(iso5), 0x200, []uint32{mov_tag(iso5), mov_tag(iso6), mov_tag(mp41)})
-			_, err := muxer.writer.Write(ftypBox)
-			if err != nil {
-				return err
-			}
-			if err := muxer.writeMoov(muxer.writer); err != nil {
-				return err
-			}
+	if muxer.movFlag.isFragment() && muxer.nextFragmentId == 0 {
+		// first fragment: the file head (ftyp, moov, room for the sidx) goes
+		// out ahead of it
+		if err = muxer.writeFileHeader(); err != nil {
+			return err
 		}
 	}
 
@@ -486,7 +518,9 @@ func (muxer *Movmuxer) flushFragment() (err error) {
 		traf := makeTraf(muxer.tracks[i], uint64(moofOffset), uint64(0))
 		moofSize += len(traf)
 		trafs[i-1] = traf
+		muxer.tracks[i].totalDuration += uint64(muxer.tracks[i].runDuration)
 	}
+	muxer.header.addFragment(uint64(moofOffset), muxer.tracks)
 
 	moofSize += 8 //moof box
 	for i := range trafs {

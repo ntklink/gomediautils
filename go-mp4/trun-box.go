@@ -233,6 +233,7 @@ func decodeTrunBox(demuxer *MovDemuxer, size uint32) (err error) {
 }
 
 func makeTrunBoxes(track *mp4track, moofSize uint64) []byte {
+	track.runDuration = 0
 	boxes := make([]byte, 0, 128)
 	start := 0
 	end := 0
@@ -296,6 +297,7 @@ func makeTrunBox(track *mp4track, start, end int, moofSize uint64) []byte {
 			sampleDuration = uint32(track.samplelist[i+1].dts - track.samplelist[i].dts)
 		}
 
+		track.runDuration += sampleDuration
 		entry := trunEntry{
 			sampleDuration:              sampleDuration,
 			sampleSize:                  uint32(track.samplelist[i].size),

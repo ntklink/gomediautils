@@ -132,6 +132,11 @@ type mp4track struct {
 	defaultDuration    uint32
 	defaultSampleFlags uint32
 	baseDataOffset     uint64
+	// runDuration is the sum of the sample durations written into the trun
+	// boxes of the fragment being built; totalDuration accumulates it over
+	// every fragment written so far and is what the moov reports at the end
+	runDuration   uint32
+	totalDuration uint64
 
 	//for subsample
 	defaultIsProtected     uint8
