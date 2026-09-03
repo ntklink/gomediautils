@@ -51,6 +51,7 @@ type Movmuxer struct {
 	onNewFragment  OnFragment
 	fragDuration   uint32
 	sidxReserve    uint32
+	durationHint   uint64
 	header         fmp4Header
 }
 
@@ -85,6 +86,26 @@ func WithSidxReserve(fragments uint32) MuxerOption {
 			fragments = maxSidxReserve
 		}
 		muxer.sidxReserve = fragments
+	}
+}
+
+// WithDurationHint sets the expected length of the presentation, in
+// milliseconds, for a MP4_FLAG_FRAGMENT file.
+//
+// The moov at the head of such a file goes out ahead of the first fragment,
+// before the real length is known, and WriteTrailer can only correct it when
+// the writer seeks backwards. Over a write once sink, an HTTP response say,
+// the head keeps what it was given and a player that trusts the moov
+// (android's MediaPlayer, ExoPlayer) reports the length of the first fragment
+// as the length of the whole file. A caller that knows the length up front,
+// from the time range of the recording it is handing out, passes it here and
+// those players report that instead. It stays a hint: a seekable writer still
+// overwrites it with the exact length in WriteTrailer, and it does not give
+// android a way to seek, which needs the sidx that only WriteTrailer can fill
+// in.
+func WithDurationHint(milliseconds uint64) MuxerOption {
+	return func(muxer *Movmuxer) {
+		muxer.durationHint = milliseconds
 	}
 }
 

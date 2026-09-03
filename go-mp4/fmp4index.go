@@ -79,14 +79,20 @@ func (muxer *Movmuxer) writeFileHeader() error {
 	if err != nil {
 		return err
 	}
-	if _, err := muxer.writer.Write(moov); err != nil {
-		return err
-	}
+	// the pristine moov is what finishFileHeader patches the exact durations
+	// into, so the copy carrying the hint is the one that goes out
 	muxer.header = fmp4Header{
 		writer:     muxer.writer,
 		moovOffset: moovOffset,
 		moov:       moov,
 		refTrack:   muxer.indexTrack(),
+	}
+	head, err := muxer.hintedMoov(moov)
+	if err != nil {
+		return err
+	}
+	if _, err := muxer.writer.Write(head); err != nil {
+		return err
 	}
 	if muxer.sidxReserve == 0 {
 		return nil
@@ -101,6 +107,26 @@ func (muxer *Movmuxer) writeFileHeader() error {
 	muxer.header.sidxOffset = moovOffset + int64(len(moov))
 	muxer.header.sidxSpace = space
 	return nil
+}
+
+// hintedMoov returns the moov to write at the head of the file: the one built
+// from the tracks, or a copy carrying the duration hint when the caller gave
+// one. A hint of zero, the default, leaves the moov alone.
+func (muxer *Movmuxer) hintedMoov(moov []byte) ([]byte, error) {
+	if muxer.durationHint == 0 {
+		return moov, nil
+	}
+	// the hint counts in the movie timescale, which makeMvhdBox fixes at 1000
+	trackDurations := make(map[uint32]uint64, len(muxer.tracks))
+	for id, track := range muxer.tracks {
+		trackDurations[id] = muxer.durationHint * uint64(track.timescale) / 1000
+	}
+	hinted := make([]byte, len(moov))
+	copy(hinted, moov)
+	if err := patchMoovDurations(hinted, muxer.durationHint, trackDurations); err != nil {
+		return nil, err
+	}
+	return hinted, nil
 }
 
 // finishFileHeader goes back to the head of the file, writes the real

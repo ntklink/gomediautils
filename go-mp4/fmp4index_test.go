@@ -3,6 +3,8 @@ package mp4
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io"
 	"testing"
 )
 
@@ -459,5 +461,80 @@ func TestDashSegmentSidxDescribesItsFragment(t *testing.T) {
 	}
 	if segments != 2 {
 		t.Fatalf("got %d segments, want 2", segments)
+	}
+}
+
+// streamWriteSeeker is a write once sink, an HTTP response say: it answers
+// where the next write lands and a seek that goes nowhere, and refuses every
+// seek that would move backwards.
+type streamWriteSeeker struct{ buf []byte }
+
+func (s *streamWriteSeeker) Write(p []byte) (int, error) {
+	s.buf = append(s.buf, p...)
+	return len(p), nil
+}
+
+func (s *streamWriteSeeker) Seek(offset int64, whence int) (int64, error) {
+	pos := int64(len(s.buf))
+	if (whence == io.SeekCurrent && offset == 0) || (whence == io.SeekStart && offset == pos) {
+		return pos, nil
+	}
+	return pos, errors.New("stream is not seekable")
+}
+
+func muxVideoFragmentsTo(t *testing.T, w io.WriteSeeker, frames, gop int, options ...MuxerOption) {
+	t.Helper()
+	muxer, err := CreateMp4Muxer(w, append([]MuxerOption{WithMp4Flag(MP4_FLAG_FRAGMENT)}, options...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vtid, err := muxer.AddVideoTrack(MP4_CODEC_H264)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < frames; i++ {
+		frame := testP
+		if i%gop == 0 {
+			frame = append(append(append([]byte{}, testSPS...), testPPS...), testIDR...)
+		}
+		if err := muxer.Write(vtid, frame, uint64(i*40), uint64(i*40)); err != nil {
+			t.Fatalf("frame %d: %v", i, err)
+		}
+	}
+	if err := muxer.WriteTrailer(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDurationHintReachesHeadOfUnseekableFile(t *testing.T) {
+	w := &streamWriteSeeker{}
+	// 10 frames of 40 ms really last 400 ms, so a head carrying the hint
+	// cannot be one the muxer filled in from the samples
+	const hint = 60000
+	muxVideoFragmentsTo(t, w, 10, 5, WithSidxReserve(0), WithDurationHint(hint))
+
+	boxes := topLevelBoxes(t, w.buf)
+	moovs := 0
+	for _, b := range boxes {
+		if b.typ == "moov" {
+			moovs++
+		}
+	}
+	if moovs != 1 {
+		t.Fatalf("got %d moov boxes, want 1: a head that cannot be patched must not be appended again", moovs)
+	}
+	movie, tkhd, mdhd := moovDurations(t, findBox(boxes, "moov").data)
+	if movie != hint || tkhd[1] != hint || mdhd[1] != hint {
+		t.Fatalf("durations mvhd=%d tkhd=%d mdhd=%d, want %d for all", movie, tkhd[1], mdhd[1], hint)
+	}
+}
+
+func TestDurationHintYieldsToRealDurationWhenSeekable(t *testing.T) {
+	buf := muxVideoFragments(t, 10, 5, WithDurationHint(60000))
+	movie, tkhd, mdhd := moovDurations(t, findBox(topLevelBoxes(t, buf), "moov").data)
+	// a writer that seeks gets the length WriteTrailer measured, not the hint
+	const want = 400
+	if movie != want || tkhd[1] != want || mdhd[1] != want {
+		t.Fatalf("durations mvhd=%d tkhd=%d mdhd=%d, want %d for all", movie, tkhd[1], mdhd[1], want)
 	}
 }
