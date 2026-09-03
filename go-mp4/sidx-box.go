@@ -54,8 +54,12 @@ func NewSegmentIndexBox() *SegmentIndexBox {
 	}
 }
 
+// Size is the encoded size of the box. It is computed from the entries, not
+// from the size already stored in the header: FullBox.Size returns that
+// stored value once it is set, which made a second call (Encode after a
+// caller had set it) grow the box by another header and pad it with junk.
 func (sidx *SegmentIndexBox) Size() uint64 {
-	return sidx.Box.Size() + 28 + uint64(len(sidx.Entrys)*12)
+	return uint64(sidxBoxSize(len(sidx.Entrys)))
 }
 
 func (sidx *SegmentIndexBox) Decode(r io.Reader) (offset int, err error) {
@@ -149,27 +153,30 @@ func (sidx *SegmentIndexBox) Encode() (int, []byte) {
 	return offset, boxdata
 }
 
-func makeSidxBox(track *mp4track, totalSidxSize uint32, refsize uint32) []byte {
+// makeSidxBox builds the one entry sidx that precedes a dash segment. The
+// entry references the moof+mdat pair of refSize bytes; firstOffset is the
+// distance from the end of this sidx to that moof, which is the room taken
+// by the sidx boxes of the other tracks that sit in between. The subsegment
+// duration is what the trun boxes of the fragment add up to, so the last
+// sample counts too; makeTraf has to have run for this fragment already.
+func makeSidxBox(track *mp4track, firstOffset uint32, refSize uint32) []byte {
 	sidx := NewSegmentIndexBox()
 	sidx.ReferenceID = track.trackId
 	sidx.TimeScale = track.timescale
 	sidx.EarliestPresentationTime = track.startPts
 	sidx.ReferenceCount = 1
-	sidx.FirstOffset = 52 + uint64(totalSidxSize)
+	sidx.FirstOffset = uint64(firstOffset)
 	entry := sidxEntry{
-		ReferenceType:      0,
-		ReferencedSize:     refsize,
-		SubsegmentDuration: 0,
+		ReferencedSize:     refSize,
+		SubsegmentDuration: track.runDuration,
 		StartsWithSAP:      1,
-		SAPType:            0,
-		SAPDeltaTime:       0,
+		SAPType:            1,
 	}
-
-	if len(track.samplelist) > 0 {
-		entry.SubsegmentDuration = uint32(track.samplelist[len(track.samplelist)-1].dts) - uint32(track.startDts)
+	if len(track.samplelist) > 0 && isVideo(track.cid) && !track.samplelist[0].isKeyFrame {
+		entry.StartsWithSAP = 0
+		entry.SAPType = 0
 	}
 	sidx.Entrys = append(sidx.Entrys, entry)
-	sidx.Box.Box.Size = sidx.Size()
 	_, boxData := sidx.Encode()
 	return boxData
 }

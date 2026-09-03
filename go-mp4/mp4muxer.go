@@ -554,8 +554,11 @@ func (muxer *Movmuxer) flushFragment() (err error) {
 			return err
 		}
 
+		// one sidx per track, each pointing past the sidx boxes that follow
+		// it at the moof+mdat pair
+		sidxSize := uint32(sidxBoxSize(1))
 		for i := uint32(1); i < muxer.nextTrackId; i++ {
-			sidx := makeSidxBox(muxer.tracks[i], 52*(muxer.nextTrackId-1-i), uint32(mdatlen)+uint32(len(moofBox))+52*(muxer.nextTrackId-i-1))
+			sidx := makeSidxBox(muxer.tracks[i], sidxSize*(muxer.nextTrackId-1-i), uint32(mdatlen)+uint32(len(moofBox)))
 			_, err := muxer.writer.Write(sidx)
 			if err != nil {
 				return err

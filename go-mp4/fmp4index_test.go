@@ -388,3 +388,76 @@ func TestPatchMoovDurationsRewritesEveryHeader(t *testing.T) {
 		t.Fatalf("patched durations mvhd=%d tkhd=%v mdhd=%v", movie, tkhd, mdhd)
 	}
 }
+
+func TestDashSegmentSidxDescribesItsFragment(t *testing.T) {
+	w := newMemWriteSeeker()
+	muxer, err := CreateMp4Muxer(w, WithMp4Flag(MP4_FLAG_DASH))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vtid, err := muxer.AddVideoTrack(MP4_CODEC_H264)
+	if err != nil {
+		t.Fatal(err)
+	}
+	atid, err := muxer.AddAudioTrack(MP4_CODEC_AAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := append(append(append([]byte{}, testSPS...), testPPS...), testIDR...)
+	for i := 0; i < 10; i++ {
+		frame := testP
+		if i%5 == 0 {
+			frame = key
+		}
+		if err := muxer.Write(vtid, frame, uint64(i*40), uint64(i*40)); err != nil {
+			t.Fatal(err)
+		}
+		if err := muxer.Write(atid, adtsFrame(50), uint64(i*40), uint64(i*40)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// dash output leaves the last segment to the caller, as the hls examples do
+	if err := muxer.FlushFragment(); err != nil {
+		t.Fatal(err)
+	}
+	if err := muxer.WriteTrailer(); err != nil {
+		t.Fatal(err)
+	}
+
+	boxes := topLevelBoxes(t, w.buf)
+	segments := 0
+	for i := 0; i < len(boxes); i++ {
+		if boxes[i].typ != "styp" {
+			continue
+		}
+		segments++
+		// styp, one sidx per track, moof, mdat
+		if i+4 >= len(boxes) || boxes[i+1].typ != "sidx" || boxes[i+2].typ != "sidx" || boxes[i+3].typ != "moof" || boxes[i+4].typ != "mdat" {
+			t.Fatalf("segment %d: unexpected layout after styp at %d", segments, boxes[i].off)
+		}
+		moof, mdat := boxes[i+3], boxes[i+4]
+		for k, sidx := range boxes[i+1 : i+3] {
+			if sidx.size != sidxBoxSize(1) {
+				t.Fatalf("segment %d sidx %d is %d bytes, want %d", segments, k, sidx.size, sidxBoxSize(1))
+			}
+			_, _, firstOffset, refs := decodeSidx(t, sidx.data)
+			if sidx.off+sidx.size+int(firstOffset) != moof.off {
+				t.Fatalf("segment %d sidx %d: first_offset %d does not land on the moof at %d", segments, k, firstOffset, moof.off)
+			}
+			if len(refs) != 1 || int(refs[0].size) != moof.size+mdat.size {
+				t.Fatalf("segment %d sidx %d: refs %v, want one of %d bytes", segments, k, refs, moof.size+mdat.size)
+			}
+			// five frames of 40 ms per fragment, the last one given the
+			// duration of the one before
+			if refs[0].duration != 200 {
+				t.Fatalf("segment %d sidx %d: duration %d, want 200", segments, k, refs[0].duration)
+			}
+			if sidx.data[48]>>4 != 0x9 { // starts_with_SAP=1, SAP_type=1
+				t.Fatalf("segment %d sidx %d: SAP byte %#x, want starts_with_SAP=1 SAP_type=1", segments, k, sidx.data[48])
+			}
+		}
+	}
+	if segments != 2 {
+		t.Fatalf("got %d segments, want 2", segments)
+	}
+}
