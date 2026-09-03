@@ -2,11 +2,14 @@ package mp4
 
 func makeMvex(muxer *Movmuxer) []byte {
 	// mehd comes first and is the only box that states the length of the
-	// whole presentation, fragments included; without a hint the length is
-	// not known here and the box is left out, so a player works it out by
-	// walking the fragments
+	// whole presentation, fragments included. A plain fragmented file always
+	// carries one: the hint fills it in, and WriteTrailer writes the measured
+	// length over it when the writer seeks. It stays zero only for a file
+	// that is neither hinted nor seekable, a live stream, whose length is
+	// genuinely unknown while the head goes out. Dash keeps it out, a segment
+	// carries its own sidx.
 	var mehd []byte
-	if muxer.durationHint > 0 {
+	if muxer.movFlag.isFragment() && !muxer.movFlag.isDash() {
 		mehd = makeMehdBox(muxer.durationHint)
 	}
 	trexs := make([]byte, 0, 64)

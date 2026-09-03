@@ -139,11 +139,21 @@ func TestFragmentedFileHeaderCarriesWholeDuration(t *testing.T) {
 	if moov == nil {
 		t.Fatal("no moov box")
 	}
-	movie, tkhd, mdhd := moovDurations(t, moov.data)
 	// 10 frames of 40 ms; the last one is given the duration of the one before
 	const want = 400
-	if movie != want || tkhd[1] != want || mdhd[1] != want {
-		t.Fatalf("durations mvhd=%d tkhd=%d mdhd=%d, want %d for all", movie, tkhd[1], mdhd[1], want)
+	got, ok := mehdDuration(t, moov.data)
+	if !ok {
+		t.Fatal("no mehd box: nothing states the length of the presentation")
+	}
+	if got != want {
+		t.Fatalf("mehd duration %d, want %d", got, want)
+	}
+	// the fragments extend whatever the moov describes, so the durations in
+	// the moov itself stay zero; a non zero one is added to the fragments and
+	// doubles the length the player reports
+	movie, tkhd, mdhd := moovDurations(t, moov.data)
+	if movie != 0 || tkhd[1] != 0 || mdhd[1] != 0 {
+		t.Fatalf("moov durations mvhd=%d tkhd=%d mdhd=%d, want 0 for all", movie, tkhd[1], mdhd[1])
 	}
 
 	// the head of the file is ftyp, moov, sidx, then the fragments
@@ -182,8 +192,8 @@ func TestFragmentedFileHeaderCarriesWholeDuration(t *testing.T) {
 	if refs[0].duration != 200 || refs[1].duration != 200 {
 		t.Fatalf("sidx durations %v, want 200 each", refs)
 	}
-	if refs[0].duration+refs[1].duration != movie {
-		t.Fatalf("sidx covers %d, moov says %d", refs[0].duration+refs[1].duration, movie)
+	if uint64(refs[0].duration+refs[1].duration) != got {
+		t.Fatalf("sidx covers %d, mehd says %d", refs[0].duration+refs[1].duration, got)
 	}
 
 	// the demuxer must still read the file
@@ -273,9 +283,16 @@ func TestSidxReserveZeroWritesNoIndexButFixesDurations(t *testing.T) {
 	if boxes[1].typ != "moov" || boxes[2].typ != "moof" {
 		t.Fatalf("layout %s %s, want moov moof", boxes[1].typ, boxes[2].typ)
 	}
+	got, ok := mehdDuration(t, boxes[1].data)
+	if !ok {
+		t.Fatal("no mehd box")
+	}
+	if got != 400 {
+		t.Fatalf("mehd duration %d, want 400", got)
+	}
 	movie, _, mdhd := moovDurations(t, boxes[1].data)
-	if movie != 400 || mdhd[1] != 400 {
-		t.Fatalf("durations mvhd=%d mdhd=%d, want 400", movie, mdhd[1])
+	if movie != 0 || mdhd[1] != 0 {
+		t.Fatalf("moov durations mvhd=%d mdhd=%d, want 0", movie, mdhd[1])
 	}
 }
 
@@ -575,4 +592,21 @@ func mehdDuration(t *testing.T, moov []byte) (uint64, bool) {
 		t.Fatal(err)
 	}
 	return got, found
+}
+
+func TestUnhintedUnseekableFileLeavesLengthUnstated(t *testing.T) {
+	w := &streamWriteSeeker{}
+	muxVideoFragmentsTo(t, w, 10, 5, WithSidxReserve(0))
+	moov := findBox(topLevelBoxes(t, w.buf), "moov").data
+
+	// nothing knew the length while the head went out, so nothing may claim
+	// one: a player walks the fragments and gets the right answer only if
+	// every duration in the moov reads zero
+	movie, tkhd, mdhd := moovDurations(t, moov)
+	if movie != 0 || tkhd[1] != 0 || mdhd[1] != 0 {
+		t.Fatalf("moov durations mvhd=%d tkhd=%d mdhd=%d, want 0 for all", movie, tkhd[1], mdhd[1])
+	}
+	if got, ok := mehdDuration(t, moov); ok && got != 0 {
+		t.Fatalf("mehd duration %d, want 0 for a length nobody could know", got)
+	}
 }

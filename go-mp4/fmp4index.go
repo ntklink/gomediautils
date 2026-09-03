@@ -124,19 +124,19 @@ func (muxer *Movmuxer) finishFileHeader() error {
 		return nil
 	}
 
-	trackDurations := make(map[uint32]uint64, len(muxer.tracks))
 	var movieDuration uint64
-	for id, track := range muxer.tracks {
-		trackDurations[id] = track.totalDuration
-		// tkhd and mvhd count in the movie timescale, which makeMvhdBox
-		// fixes at 1000
+	for _, track := range muxer.tracks {
+		// mehd counts in the movie timescale, which makeMvhdBox fixes at 1000
 		if d := track.totalDuration * 1000 / uint64(track.timescale); d > movieDuration {
 			movieDuration = d
 		}
 	}
+	// only mehd: the durations in mvhd, tkhd and mdhd describe what the moov
+	// itself holds, which for a fragmented file is nothing, and a player that
+	// adds them to the fragments reports twice the real length
 	moov := make([]byte, len(h.moov))
 	copy(moov, h.moov)
-	if err := patchMoovDurations(moov, movieDuration, trackDurations); err != nil {
+	if err := patchMoovMehd(moov, movieDuration); err != nil {
 		return err
 	}
 	if _, err := muxer.writer.Write(moov); err != nil {
@@ -291,19 +291,42 @@ func patchMoovDurations(moov []byte, movieDuration uint64, trackDurations map[ui
 			case "trak":
 				return patchTrakDurations(box, trackDurations)
 			case "mvex":
-				return walkBoxes(box[BasicBoxLen:], func(boxType string, box []byte) error {
-					if boxType != "mehd" {
-						return nil
-					}
-					if len(box) < mehdBoxSize {
-						return errors.New("mp4: mehd box too short")
-					}
-					binary.BigEndian.PutUint64(box[FullBoxLen:], movieDuration)
-					return nil
-				})
+				return patchMvexMehd(box, movieDuration)
 			}
 			return nil
 		})
+	})
+}
+
+// patchMoovMehd rewrites, in place, the length of the whole presentation in
+// the mehd box, leaving every other duration in the moov alone. A moov with
+// no mehd is left untouched: a player then works the length out by walking
+// the fragments, which is correct as long as the moov's own durations are
+// zero.
+func patchMoovMehd(moov []byte, movieDuration uint64) error {
+	return walkBoxes(moov, func(boxType string, box []byte) error {
+		if boxType != "moov" {
+			return nil
+		}
+		return walkBoxes(box[BasicBoxLen:], func(boxType string, box []byte) error {
+			if boxType != "mvex" {
+				return nil
+			}
+			return patchMvexMehd(box, movieDuration)
+		})
+	})
+}
+
+func patchMvexMehd(mvex []byte, movieDuration uint64) error {
+	return walkBoxes(mvex[BasicBoxLen:], func(boxType string, box []byte) error {
+		if boxType != "mehd" {
+			return nil
+		}
+		if len(box) < mehdBoxSize {
+			return errors.New("mp4: mehd box too short")
+		}
+		binary.BigEndian.PutUint64(box[FullBoxLen:], movieDuration)
+		return nil
 	})
 }
 
