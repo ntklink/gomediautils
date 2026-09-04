@@ -10,7 +10,7 @@ func makeMvex(muxer *Movmuxer) []byte {
 	// carries its own sidx.
 	var mehd []byte
 	if muxer.movFlag.isFragment() && !muxer.movFlag.isDash() {
-		mehd = makeMehdBox(muxer.durationHint)
+		mehd = makeMehdBox(muxer.durationHint, muxer.mehdVersion0)
 	}
 	trexs := make([]byte, 0, 64)
 	for i := uint32(1); i < muxer.nextTrackId; i++ {

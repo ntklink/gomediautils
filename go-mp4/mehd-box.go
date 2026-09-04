@@ -24,9 +24,10 @@ import (
 // fragments and reports twice the real length, playing the first half and
 // sitting on a frozen frame through the second.
 //
-// This muxer always writes version 1, so the box keeps its size whatever the
-// duration turns out to be and WriteTrailer can patch the real value over a
-// placeholder.
+// The muxer writes version 1 by default, so the box keeps its size whatever
+// the duration turns out to be and WriteTrailer can patch the real value over
+// a placeholder. Callers may explicitly request version 0 for compatibility
+// when the duration fits in 32 bits.
 type MovieExtendsHeaderBox struct {
 	Box              *FullBox
 	FragmentDuration uint64
@@ -77,11 +78,17 @@ func (mehd *MovieExtendsHeaderBox) Encode() (int, []byte) {
 	return offset + 4, boxdata
 }
 
-// mehdBoxSize is the encoded size of the version 1 box this muxer writes.
-const mehdBoxSize = FullBoxLen + 8
+const (
+	mehdVersion0BoxSize     = FullBoxLen + 4
+	mehdVersion1BoxSize     = FullBoxLen + 8
+	maxMehdVersion0Duration = uint64(0xFFFFFFFF)
+)
 
-func makeMehdBox(duration uint64) []byte {
+func makeMehdBox(duration uint64, version0 bool) []byte {
 	mehd := NewMovieExtendsHeaderBox(duration)
+	if version0 && duration <= maxMehdVersion0Duration {
+		mehd.Box.Version = 0
+	}
 	_, boxData := mehd.Encode()
 	return boxData
 }

@@ -556,6 +556,40 @@ func TestDurationHintReachesHeadOfUnseekableFile(t *testing.T) {
 	}
 }
 
+func TestDurationHintVersion0ReachesUnseekableFileHead(t *testing.T) {
+	w := &streamWriteSeeker{}
+	const hint = 60000
+	muxVideoFragmentsTo(t, w, 10, 5,
+		WithSidxReserve(0),
+		WithDurationHint(hint),
+		WithMehdVersion0(),
+	)
+
+	moov := findBox(topLevelBoxes(t, w.buf), "moov").data
+	got, version, size, ok := mehdInfo(t, moov)
+	if !ok {
+		t.Fatal("no mehd box")
+	}
+	if version != 0 || size != mehdVersion0BoxSize || got != hint {
+		t.Fatalf("mehd version=%d size=%d duration=%d, want version=0 size=%d duration=%d",
+			version, size, got, mehdVersion0BoxSize, hint)
+	}
+}
+
+func TestDurationHintVersion0CanBePatchedOnSeekableFile(t *testing.T) {
+	buf := muxVideoFragments(t, 10, 5, WithDurationHint(60000), WithMehdVersion0())
+	moov := findBox(topLevelBoxes(t, buf), "moov").data
+	got, version, size, ok := mehdInfo(t, moov)
+	if !ok {
+		t.Fatal("no mehd box")
+	}
+	const want = 400
+	if version != 0 || size != mehdVersion0BoxSize || got != want {
+		t.Fatalf("mehd version=%d size=%d duration=%d, want version=0 size=%d duration=%d",
+			version, size, got, mehdVersion0BoxSize, want)
+	}
+}
+
 func TestDurationHintYieldsToRealDurationWhenSeekable(t *testing.T) {
 	buf := muxVideoFragments(t, 10, 5, WithDurationHint(60000))
 	moov := findBox(topLevelBoxes(t, buf), "moov").data
@@ -574,15 +608,37 @@ func TestDurationHintYieldsToRealDurationWhenSeekable(t *testing.T) {
 // fragments included. It reports false when the box is absent.
 func mehdDuration(t *testing.T, moov []byte) (uint64, bool) {
 	t.Helper()
-	var got uint64
-	var found bool
+	duration, _, _, found := mehdInfo(t, moov)
+	return duration, found
+}
+
+func mehdInfo(t *testing.T, moov []byte) (duration uint64, version uint8, size int, found bool) {
+	t.Helper()
 	err := walkBoxes(moov[BasicBoxLen:], func(typ string, box []byte) error {
 		if typ != "mvex" {
 			return nil
 		}
 		return walkBoxes(box[BasicBoxLen:], func(typ string, box []byte) error {
 			if typ == "mehd" {
-				got = binary.BigEndian.Uint64(box[FullBoxLen:])
+				if len(box) < FullBoxLen {
+					t.Fatal("mehd box too short")
+				}
+				version = box[8]
+				size = len(box)
+				switch version {
+				case 0:
+					if len(box) < mehdVersion0BoxSize {
+						t.Fatal("version 0 mehd box too short")
+					}
+					duration = uint64(binary.BigEndian.Uint32(box[FullBoxLen:]))
+				case 1:
+					if len(box) < mehdVersion1BoxSize {
+						t.Fatal("version 1 mehd box too short")
+					}
+					duration = binary.BigEndian.Uint64(box[FullBoxLen:])
+				default:
+					t.Fatalf("unsupported mehd version %d", version)
+				}
 				found = true
 			}
 			return nil
@@ -591,7 +647,7 @@ func mehdDuration(t *testing.T, moov []byte) (uint64, bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return got, found
+	return duration, version, size, found
 }
 
 func TestUnhintedUnseekableFileLeavesLengthUnstated(t *testing.T) {

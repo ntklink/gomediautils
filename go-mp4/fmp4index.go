@@ -322,11 +322,28 @@ func patchMvexMehd(mvex []byte, movieDuration uint64) error {
 		if boxType != "mehd" {
 			return nil
 		}
-		if len(box) < mehdBoxSize {
+		if len(box) < FullBoxLen {
 			return errors.New("mp4: mehd box too short")
 		}
-		binary.BigEndian.PutUint64(box[FullBoxLen:], movieDuration)
-		return nil
+		switch box[8] {
+		case 0:
+			if len(box) < mehdVersion0BoxSize {
+				return errors.New("mp4: version 0 mehd box too short")
+			}
+			if movieDuration > maxMehdVersion0Duration {
+				return errors.New("mp4: duration does not fit in version 0 mehd")
+			}
+			binary.BigEndian.PutUint32(box[FullBoxLen:], uint32(movieDuration))
+			return nil
+		case 1:
+			if len(box) < mehdVersion1BoxSize {
+				return errors.New("mp4: version 1 mehd box too short")
+			}
+			binary.BigEndian.PutUint64(box[FullBoxLen:], movieDuration)
+			return nil
+		default:
+			return errors.New("mp4: unsupported mehd version")
+		}
 	})
 }
 

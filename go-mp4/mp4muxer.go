@@ -52,6 +52,7 @@ type Movmuxer struct {
 	fragDuration   uint32
 	sidxReserve    uint32
 	durationHint   uint64
+	mehdVersion0   bool
 	header         fmp4Header
 }
 
@@ -106,6 +107,16 @@ func WithSidxReserve(fragments uint32) MuxerOption {
 func WithDurationHint(milliseconds uint64) MuxerOption {
 	return func(muxer *Movmuxer) {
 		muxer.durationHint = milliseconds
+	}
+}
+
+// WithMehdVersion0 writes a 32-bit version 0 MovieExtendsHeaderBox when its
+// duration fits. This is useful for compatibility with legacy MP4 parsers
+// which do not read the 64-bit duration in a version 1 mehd correctly.
+// Durations larger than version 0 can represent still use version 1.
+func WithMehdVersion0() MuxerOption {
+	return func(muxer *Movmuxer) {
+		muxer.mehdVersion0 = true
 	}
 }
 
