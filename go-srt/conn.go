@@ -104,13 +104,17 @@ func (c Config) withDefaults() (Config, error) {
 	if c.MaxSendDelay < 0 {
 		return c, errors.New("srt: negative MaxSendDelay")
 	}
-	// the latency agreed on is at least ours, so packets are kept at least
-	// this long
-	if c.MaxSendDelay >= holdLimit(c.Latency) {
+	// the latency agreed on is at least ours as the handshake carries it,
+	// in whole milliseconds, so packets are kept at least this long
+	if c.MaxSendDelay >= holdLimit(c.Latency.Truncate(time.Millisecond)) {
 		return c, errors.New("srt: MaxSendDelay not below the latency and a quarter")
 	}
 	if c.SendBufferSize <= 0 {
 		c.SendBufferSize = senderBufSize * c.PayloadSize
+	}
+	// a smaller buffer holds one packet at a time, a packet an ACK
+	if c.SendBufferSize < c.PayloadSize {
+		return c, errors.New("srt: SendBufferSize below PayloadSize")
 	}
 	return c, nil
 }
@@ -128,12 +132,14 @@ type Stats struct {
 	// PacketsSendDropped is how many packets the sender stopped holding
 	// for retransmission because they were too old to arrive in time.
 	PacketsSendDropped uint64
-	// SendErrors is how many packets the socket refused to send (ENOBUFS,
-	// a network change, ...). They are counted as lost and recovered by
-	// retransmission like a packet lost on the way.
+	// SendErrors is how many times the socket refused a data packet
+	// (ENOBUFS, a network change, ...), sent first or again. A refused
+	// packet counts as lost and stays buffered for retransmission like a
+	// packet lost on the way.
 	SendErrors uint64
-	// SendBuffered is how many sent packets the peer has not acknowledged
-	// yet, and SendBufferDelay how long the oldest of them has waited. On a
+	// SendBuffered is how many packets written the peer has not
+	// acknowledged yet, those the socket refused included, and
+	// SendBufferDelay how long the oldest of them has waited. On a
 	// healthy link they stay around one round trip's worth; growing towards
 	// the latency they are the early sign of congestion, which MaxSendDelay
 	// turns into Write waiting. PacketsSendDropped is the late one.
@@ -219,6 +225,7 @@ type Conn struct {
 	// the write deadline moves: every Write waiting for room looks again
 	sendWake      chan struct{}
 	writeDeadline time.Time
+	closing       bool // Close is letting the last packets go out
 	closed        bool
 	closeErr      error
 	done          chan struct{}
@@ -355,6 +362,9 @@ func (c *Conn) sendControl(typ uint16, subtype uint16, typeInfo uint32, cif []by
 func (c *Conn) Write(b []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closing || c.closed {
+		return 0, c.closedErr()
+	}
 	for off := 0; off < len(b); off += c.cfg.PayloadSize {
 		chunk := b[off:min(off+c.cfg.PayloadSize, len(b))]
 		if err := c.waitSendRoom(len(chunk)); err != nil {
@@ -423,7 +433,7 @@ func (c *Conn) waitSendRoom(size int) error {
 		}
 	}()
 	for {
-		if c.closed {
+		if c.closing || c.closed {
 			return c.closedErr()
 		}
 		if !c.sendFull(time.Now(), size) {
@@ -553,9 +563,13 @@ func (c *Conn) notify() {
 // last packets written the time the latency allows: to be acknowledged,
 // and to be played out, since a libsrt receiver throws away what it still
 // holds when the shutdown arrives. A connection idle for longer than the
-// latency closes at once.
+// latency closes at once. Writes fail from the moment Close is called.
 func (c *Conn) Close() error {
 	c.mu.Lock()
+	if !c.closing && !c.closed {
+		c.closing = true
+		c.wakeWriters()
+	}
 	linger := time.Now().Add(c.sndLatency + max(3*c.rtt, 100*time.Millisecond))
 	for !c.closed && time.Now().Before(linger) &&
 		(len(c.sndBuf) > 0 || time.Since(c.lastData) < c.sndLatency) {
@@ -942,6 +956,8 @@ func (c *Conn) handleNAK(p *packet) {
 		if c.send(raw) == nil {
 			c.stats.PacketsRetransmitted++
 			c.lastSend = time.Now()
+		} else {
+			c.stats.SendErrors++
 		}
 	})
 	for i := 0; i < len(gone); {
@@ -986,6 +1002,8 @@ func (c *Conn) resendTail(now time.Time) {
 		markRetransmitted(raw)
 		if c.send(raw) == nil {
 			c.stats.PacketsRetransmitted++
+		} else {
+			c.stats.SendErrors++
 		}
 	}
 	// wait a full round again before the next attempt
