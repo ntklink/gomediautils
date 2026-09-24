@@ -20,12 +20,6 @@ const (
 	kekIteration = 2048
 )
 
-// KM response states sent back instead of the key material.
-const (
-	kmStateBadSecret = 4
-	kmStateNoSecret  = 3
-)
-
 var (
 	errBadSecret = errors.New("srt: wrong passphrase")
 	errBadKM     = errors.New("srt: malformed key material")
