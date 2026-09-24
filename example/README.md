@@ -89,6 +89,9 @@ the source file would be measuring that instead.
 | `hls_fmp4_h265` | the same for hevc, where the init segment carries an hvcC |
 | `play_mp4_with_hls` | mp4 cut into ts segments on demand, every one starting on a keyframe |
 | `edit_mp4_time` | patching mvhd/tkhd/mdhd dates in place without moving a byte |
+| `convert_mp4_to_mkv` | mp4 demuxer + matroska muxer, h264/h265 with aac/opus/mp3/g711, b frames |
+| `convert_mkv_to_mp4` | matroska demuxer + mp4 muxer: decode times for b frames, live files with unknown sizes, mkvmerge lacing, zlib and block groups |
+| `remux_webm` | vp8 and opus through the demuxer and the webm muxer, as a file with cues and as a live stream |
 
 ### demuxers
 

@@ -1,6 +1,7 @@
 package mediatest
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -40,7 +41,11 @@ func (tools Tools) AssertSameDecoded(t *testing.T, want, got, stream string) {
 // Decodable fails when ffmpeg cannot decode the whole file without errors.
 // ffmpeg is lenient by default, so the strict flags matter: without them a
 // file with a broken index or a truncated last frame still "works".
-func (tools Tools) AssertDecodable(t *testing.T, path string) {
+//
+// ignore lists messages ffmpeg prints for a file that is fine, such as the
+// channel layout it has to guess for G.711 in Matroska, which it prints for
+// its own files too.
+func (tools Tools) AssertDecodable(t *testing.T, path string, ignore ...string) {
 	t.Helper()
 	_, stderr, err := tools.runErr(tools.FFmpeg,
 		"-hide_banner", "-loglevel", "warning", "-nostdin",
@@ -50,8 +55,18 @@ func (tools Tools) AssertDecodable(t *testing.T, path string) {
 		t.Errorf("ffmpeg cannot decode %s: %v\n%s", path, err, stderr)
 		return
 	}
-	if stderr != "" {
-		t.Errorf("ffmpeg reported problems decoding %s:\n%s", path, stderr)
+	var problems []string
+	for _, line := range strings.Split(stderr, "\n") {
+		ignored := strings.TrimSpace(line) == ""
+		for _, msg := range ignore {
+			ignored = ignored || strings.Contains(line, msg)
+		}
+		if !ignored {
+			problems = append(problems, line)
+		}
+	}
+	if len(problems) > 0 {
+		t.Errorf("ffmpeg reported problems decoding %s:\n%s", path, strings.Join(problems, "\n"))
 	}
 }
 
@@ -84,4 +99,23 @@ func AssertSameTimestamps(t *testing.T, want, got []Packet, tolerance float64, w
 			return
 		}
 	}
+}
+
+// FromZero shifts packet times so the earliest presentation time is zero,
+// for comparing timelines that only differ by where they start: the mp4
+// muxer presents the first frame at zero whatever time it carried.
+func FromZero(packets []Packet) []Packet {
+	if len(packets) == 0 {
+		return packets
+	}
+	first := packets[0].Pts()
+	for _, p := range packets {
+		first = min(first, p.Pts())
+	}
+	out := make([]Packet, len(packets))
+	for i, p := range packets {
+		p.PtsTime = strconv.FormatFloat(p.Pts()-first, 'f', -1, 64)
+		out[i] = p
+	}
+	return out
 }

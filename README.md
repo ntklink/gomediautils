@@ -1,6 +1,6 @@
 # GoMediaUtils
 
-A Go library for muxing and demuxing MPEG-TS, MPEG-PS, FLV, MP4, and RTMP media streams.
+A Go library for muxing and demuxing MPEG-TS, MPEG-PS, FLV, MP4, Matroska/WebM, and RTMP media streams.
 
 ## Installation
 
@@ -25,8 +25,10 @@ See the [codec usage guide](go-codec/README.md) for more details.
 | MPEG-TS | H.264, H.265, AAC, MP3 | H.264, H.265, AAC, MP3 |
 | MPEG-PS | H.264, H.265, AAC, G.711 A-law, G.711 μ-law | H.264, H.265, AAC, G.711 A-law, G.711 μ-law |
 | FLV | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3 |
-| MP4 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3, Opus | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3 |
+| MP4 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3, Opus | H.264, H.265, AAC, G.711 A-law, G.711 μ-law, MP3, Opus |
 | fMP4 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law | H.264, H.265, AAC, G.711 A-law, G.711 μ-law |
+| Matroska (MKV) | H.264, H.265, VP8, AAC, Opus, MP3, G.711 A-law, G.711 μ-law | H.264, H.265, VP8, AAC, Opus, MP3, G.711 A-law, G.711 μ-law |
+| WebM | VP8, Opus | VP8, Opus |
 | Ogg | — | Opus, VP8 |
 
 ## RTMP
