@@ -34,6 +34,21 @@ type Config struct {
 	// PeerIdleTimeout closes a connection after this long without hearing
 	// from the peer, 5 s by default.
 	PeerIdleTimeout time.Duration
+	// MaxSendDelay makes Write wait while the oldest packet sent and not
+	// yet acknowledged has waited this long, so a sender producing more
+	// than its link carries is held back before packets are given up after
+	// the latency. 0, the default, never holds Write back for delay, as
+	// libsrt in live mode. It has to stay below the time sent packets are
+	// kept for retransmission, the latency and a quarter; half the latency
+	// is a good start. It holds back a source paced like a live stream; a
+	// single burst written faster than the link carries is bounded only by
+	// SendBufferSize.
+	MaxSendDelay time.Duration
+	// SendBufferSize caps the payload bytes sent and not yet acknowledged;
+	// Write waits while one more packet would pass it. 8192 packets of
+	// PayloadSize by default, as libsrt: enough that only a sender far
+	// beyond its link meets it.
+	SendBufferSize int
 }
 
 const (
@@ -46,7 +61,14 @@ const (
 	minNakInterval  = 20 * time.Millisecond
 	maxLossPerNak   = 300
 	receiverBufSize = 8192
+	senderBufSize   = 8192
 )
+
+// holdLimit is how long a sender keeps a packet for retransmission with
+// the given latency.
+func holdLimit(latency time.Duration) time.Duration {
+	return max(latency+latency/4+20*time.Millisecond, 100*time.Millisecond)
+}
 
 func (c Config) withDefaults() (Config, error) {
 	if c.Latency <= 0 {
@@ -79,6 +101,17 @@ func (c Config) withDefaults() (Config, error) {
 	if c.PeerIdleTimeout <= 0 {
 		c.PeerIdleTimeout = 5 * time.Second
 	}
+	if c.MaxSendDelay < 0 {
+		return c, errors.New("srt: negative MaxSendDelay")
+	}
+	// the latency agreed on is at least ours, so packets are kept at least
+	// this long
+	if c.MaxSendDelay >= holdLimit(c.Latency) {
+		return c, errors.New("srt: MaxSendDelay not below the latency and a quarter")
+	}
+	if c.SendBufferSize <= 0 {
+		c.SendBufferSize = senderBufSize * c.PayloadSize
+	}
 	return c, nil
 }
 
@@ -102,8 +135,8 @@ type Stats struct {
 	// SendBuffered is how many sent packets the peer has not acknowledged
 	// yet, and SendBufferDelay how long the oldest of them has waited. On a
 	// healthy link they stay around one round trip's worth; growing towards
-	// the latency they are the early sign of congestion that Write, which
-	// never blocks, does not give. PacketsSendDropped is the late one.
+	// the latency they are the early sign of congestion, which MaxSendDelay
+	// turns into Write waiting. PacketsSendDropped is the late one.
 	SendBuffered    int
 	SendBufferDelay time.Duration
 	RTT             time.Duration
@@ -112,6 +145,7 @@ type Stats struct {
 type sentPacket struct {
 	seq    uint32
 	raw    []byte
+	size   int // payload bytes
 	sentAt time.Time
 }
 
@@ -121,7 +155,14 @@ type rcvPacket struct {
 	skip    bool   // dropped at the sender's request
 }
 
-var errPeerIdle = errors.New("srt: peer stopped responding")
+var (
+	// ErrPeerIdle closes a connection whose peer has not been heard from
+	// for PeerIdleTimeout.
+	ErrPeerIdle = errors.New("srt: peer stopped responding")
+	// ErrPeerShutdown is why a connection the peer shut down closed. Write
+	// returns it; Read returns io.EOF instead, once what arrived is read.
+	ErrPeerShutdown = errors.New("srt: peer shut the connection down")
+)
 
 // Conn is an established SRT connection in live mode. Every Read returns
 // one message, every Write sends one or more. It implements net.Conn.
@@ -145,6 +186,7 @@ type Conn struct {
 	nextSeq  uint32
 	nextMsg  uint32
 	sndBuf   []*sentPacket // consecutive sequence numbers, oldest first
+	sndBytes int           // payload bytes in sndBuf
 	lastSend time.Time
 	lastData time.Time // last new data packet sent
 	ackMoved time.Time // last time an ACK released packets
@@ -173,10 +215,14 @@ type Conn struct {
 	ready        [][]byte
 	readyNotify  chan struct{}
 	readDeadline time.Time
-	closed       bool
-	closeErr     error
-	done         chan struct{}
-	stats        Stats
+	// sendWake is closed, and replaced, when the send buffer shrinks or
+	// the write deadline moves: every Write waiting for room looks again
+	sendWake      chan struct{}
+	writeDeadline time.Time
+	closed        bool
+	closeErr      error
+	done          chan struct{}
+	stats         Stats
 
 	// response is the handshake a listener answered with, sent again when
 	// the caller repeats its conclusion because the answer got lost
@@ -226,6 +272,7 @@ func newConn(cfg Config, p connParams, send func([]byte) error, onClose func(), 
 		// its packets are played relative to that
 		tsbpdBase:   now.Add(-time.Duration(p.peerTimestamp) * time.Microsecond),
 		readyNotify: make(chan struct{}, 1),
+		sendWake:    make(chan struct{}),
 		done:        make(chan struct{}),
 	}
 	go c.run()
@@ -254,6 +301,29 @@ func (c *Conn) Stats() Stats {
 	return s
 }
 
+// Done is closed once the connection is: by Close, by the peer, or for
+// silence. A sender with nothing to write can wait on it instead of
+// reading.
+func (c *Conn) Done() <-chan struct{} { return c.done }
+
+// Err is why the connection closed, nil while it is open: net.ErrClosed
+// after Close, ErrPeerShutdown, ErrPeerIdle, or the error of its socket.
+func (c *Conn) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		return nil
+	}
+	return c.closedErr()
+}
+
+func (c *Conn) closedErr() error {
+	if c.closeErr == nil {
+		return net.ErrClosed
+	}
+	return c.closeErr
+}
+
 func (c *Conn) now32() uint32 {
 	return uint32(time.Since(c.start) / time.Microsecond)
 }
@@ -270,21 +340,27 @@ func (c *Conn) sendControl(typ uint16, subtype uint16, typeInfo uint32, cif []by
 }
 
 // Write sends b as one message, or as several of PayloadSize bytes when it
-// is longer. Like libsrt in live mode it never blocks and does not report
-// congestion or a failed send: a packet the socket refuses counts as lost
-// and is sent again when the peer asks, and a packet still unacknowledged
-// after the latency is given up. Stats shows both, for a sender that wants
-// to know its link is falling behind. Write only fails once the connection
-// is closed.
+// is longer. It does not report a failed send: a packet the socket refuses
+// counts as lost and is sent again when the peer asks, and a packet still
+// unacknowledged after the latency is given up; Stats shows both.
+//
+// Write never waits on the network, but it waits for room in the send
+// buffer: while SendBufferSize is reached or, with MaxSendDelay set, while
+// the oldest unacknowledged packet has waited that long. That holds back a
+// sender its link cannot keep up with. A write deadline bounds the wait;
+// one already past makes Write send what fits without waiting. On a
+// timeout n counts the whole packets taken, always a multiple of
+// PayloadSize, and the error is os.ErrDeadlineExceeded. Once the
+// connection is closed Write returns why, as Err does.
 func (c *Conn) Write(b []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
-		return 0, net.ErrClosed
-	}
-	now := time.Now()
 	for off := 0; off < len(b); off += c.cfg.PayloadSize {
 		chunk := b[off:min(off+c.cfg.PayloadSize, len(b))]
+		if err := c.waitSendRoom(len(chunk)); err != nil {
+			return off, err
+		}
+		now := time.Now()
 		p := packet{
 			seq:       c.nextSeq,
 			position:  positionSolo,
@@ -304,7 +380,8 @@ func (c *Conn) Write(b []byte) (int, error) {
 		// takes it: the send buffer must hold consecutive numbers for NAKs
 		// to find what to resend, and a packet that failed to go out is
 		// just a lost one to the receiver, which asks for it again
-		c.sndBuf = append(c.sndBuf, &sentPacket{seq: p.seq, raw: raw, sentAt: now})
+		c.sndBuf = append(c.sndBuf, &sentPacket{seq: p.seq, raw: raw, size: len(chunk), sentAt: now})
+		c.sndBytes += len(chunk)
 		if err := c.send(raw); err != nil {
 			c.stats.SendErrors++
 		} else {
@@ -319,6 +396,77 @@ func (c *Conn) Write(b []byte) (int, error) {
 		}
 	}
 	return len(b), nil
+}
+
+// sendFull tells whether a packet of size bytes has to wait for room. A
+// packet always goes into an empty buffer, whatever its size.
+func (c *Conn) sendFull(now time.Time, size int) bool {
+	if len(c.sndBuf) == 0 {
+		return false
+	}
+	if c.cfg.SendBufferSize > 0 && c.sndBytes+size > c.cfg.SendBufferSize {
+		return true
+	}
+	return c.cfg.MaxSendDelay > 0 && now.Sub(c.sndBuf[0].sentAt) >= c.cfg.MaxSendDelay
+}
+
+// waitSendRoom holds a Write until a packet of size bytes may go, the
+// write deadline passes or the connection closes. c.mu is held on entry
+// and on return, and let go while waiting. The send buffer only shrinks
+// through ACKs and through packets given up, both of which wake it; with
+// neither coming, the connection closes for silence.
+func (c *Conn) waitSendRoom(size int) error {
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+	for {
+		if c.closed {
+			return c.closedErr()
+		}
+		if !c.sendFull(time.Now(), size) {
+			return nil
+		}
+		var timeout <-chan time.Time
+		if !c.writeDeadline.IsZero() {
+			d := time.Until(c.writeDeadline)
+			if d <= 0 {
+				return os.ErrDeadlineExceeded
+			}
+			if timer == nil {
+				timer = time.NewTimer(d)
+			} else {
+				timer.Reset(d)
+			}
+			timeout = timer.C
+		}
+		wake := c.sendWake
+		c.mu.Unlock()
+		select {
+		case <-wake:
+		case <-c.done:
+		case <-timeout:
+		}
+		c.mu.Lock()
+	}
+}
+
+// wakeWriters lets every Write waiting for room look again.
+func (c *Conn) wakeWriters() {
+	close(c.sendWake)
+	c.sendWake = make(chan struct{})
+}
+
+// releaseSent takes the n oldest packets out of the send buffer.
+func (c *Conn) releaseSent(n int) {
+	for _, sp := range c.sndBuf[:n] {
+		c.sndBytes -= sp.size
+	}
+	clear(c.sndBuf[:n])
+	c.sndBuf = c.sndBuf[n:]
+	c.wakeWriters()
 }
 
 // Read returns the next message, or as much of it as fits in b; the rest
@@ -342,7 +490,10 @@ func (c *Conn) Read(b []byte) (int, error) {
 			return n, nil
 		}
 		if c.closed {
-			err := c.closeErr
+			err := c.closedErr()
+			if err == ErrPeerShutdown {
+				err = io.EOF
+			}
 			c.mu.Unlock()
 			return 0, err
 		}
@@ -369,7 +520,8 @@ func (c *Conn) Read(b []byte) (int, error) {
 }
 
 func (c *Conn) SetDeadline(t time.Time) error {
-	return c.SetReadDeadline(t)
+	c.SetReadDeadline(t)
+	return c.SetWriteDeadline(t)
 }
 
 func (c *Conn) SetReadDeadline(t time.Time) error {
@@ -380,8 +532,13 @@ func (c *Conn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-// SetWriteDeadline is accepted for net.Conn; writes never block.
+// SetWriteDeadline bounds how long Write waits for room in the send
+// buffer; the zero time lets it wait as long as it takes.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
+	c.mu.Lock()
+	c.writeDeadline = t
+	c.wakeWriters()
+	c.mu.Unlock()
 	return nil
 }
 
@@ -445,7 +602,7 @@ func (c *Conn) run() {
 
 func (c *Conn) tick(now time.Time) {
 	if now.Sub(c.lastRecv) > c.cfg.PeerIdleTimeout {
-		c.closeLocked(errPeerIdle)
+		c.closeLocked(ErrPeerIdle)
 		return
 	}
 	c.deliver(now)
@@ -512,7 +669,7 @@ func (c *Conn) handlePacket(p *packet) {
 		// the peer is done; what already arrived is still the stream, so
 		// it is handed over without waiting out the latency
 		c.flushReceived()
-		c.closeLocked(io.EOF)
+		c.closeLocked(ErrPeerShutdown)
 	case ctrlUserDefine:
 		// an in band key refresh: install the new key and confirm it
 		if p.subtype == extKMReq && c.crypto != nil {
@@ -744,9 +901,12 @@ func (c *Conn) handleACK(p *packet) {
 		return
 	}
 	ack := binary.BigEndian.Uint32(p.payload) & seqMask
-	for len(c.sndBuf) > 0 && seqLess(c.sndBuf[0].seq, ack) {
-		c.sndBuf[0] = nil
-		c.sndBuf = c.sndBuf[1:]
+	n := 0
+	for n < len(c.sndBuf) && seqLess(c.sndBuf[n].seq, ack) {
+		n++
+	}
+	if n > 0 {
+		c.releaseSent(n)
 		c.ackMoved = time.Now()
 	}
 	if len(p.payload) >= 16 {
@@ -834,16 +994,19 @@ func (c *Conn) resendTail(now time.Time) {
 
 // sendHoldLimit is how long a sent packet is kept for retransmission.
 func (c *Conn) sendHoldLimit() time.Duration {
-	return max(c.sndLatency+c.sndLatency/4+20*time.Millisecond, 100*time.Millisecond)
+	return holdLimit(c.sndLatency)
 }
 
 // dropOldSent stops holding packets that could no longer arrive before
 // the peer plays past them.
 func (c *Conn) dropOldSent(now time.Time) {
 	limit := c.sendHoldLimit()
-	for len(c.sndBuf) > 0 && now.Sub(c.sndBuf[0].sentAt) > limit {
-		c.sndBuf[0] = nil
-		c.sndBuf = c.sndBuf[1:]
-		c.stats.PacketsSendDropped++
+	n := 0
+	for n < len(c.sndBuf) && now.Sub(c.sndBuf[n].sentAt) > limit {
+		n++
+	}
+	if n > 0 {
+		c.releaseSent(n)
+		c.stats.PacketsSendDropped += uint64(n)
 	}
 }

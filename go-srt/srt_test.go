@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net"
+	"os"
 	"sync"
 	"syscall"
 	"testing"
@@ -401,9 +402,19 @@ func TestParseStreamID(t *testing.T) {
 // testConn is a connection whose packets go to a slice instead of a socket.
 func testConn(t *testing.T, crypto *cryptoCtx) (*Conn, func() [][]byte) {
 	t.Helper()
+	return testConnWith(t, Config{PeerIdleTimeout: time.Minute}, crypto)
+}
+
+// testConnWith is testConn with its own configuration.
+func testConnWith(t *testing.T, cfg Config, crypto *cryptoCtx) (*Conn, func() [][]byte) {
+	t.Helper()
+	cfg, err := cfg.withDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var mu sync.Mutex
 	var sent [][]byte
-	c := newConn(Config{PayloadSize: 1316, PeerIdleTimeout: time.Minute}, connParams{
+	c := newConn(cfg, connParams{
 		socketID: 1, peerSocketID: 2, isn: 100, crypto: crypto,
 		rcvLatency: 120 * time.Millisecond, sndLatency: 120 * time.Millisecond,
 	}, func(b []byte) error {
@@ -535,5 +546,302 @@ func TestSendBufferStats(t *testing.T) {
 	c.handlePacket(&packet{control: true, ctrlType: ctrlACK, typeInfo: 1, payload: append(ack, make([]byte, 24)...)})
 	if s := c.Stats(); s.SendBuffered != 0 || s.SendBufferDelay != 0 {
 		t.Fatalf("after the ACK: %+v", s)
+	}
+}
+
+// ackUpTo acknowledges every packet before seq.
+func ackUpTo(c *Conn, seq uint32) {
+	ack := binary.BigEndian.AppendUint32(nil, seq)
+	c.handlePacket(&packet{control: true, ctrlType: ctrlACK, typeInfo: 1, payload: append(ack, make([]byte, 24)...)})
+}
+
+// A full send buffer holds Write back until an ACK makes room. A write
+// deadline bounds the wait, and n counts the whole packets taken.
+func TestWriteWaitsForSendBuffer(t *testing.T) {
+	c, _ := testConnWith(t, Config{PeerIdleTimeout: time.Minute, SendBufferSize: 2 * 1316}, nil)
+	if n, err := c.Write(make([]byte, 1316)); n != 1316 || err != nil {
+		t.Fatalf("first write: %d %v", n, err)
+	}
+	// room for one of the three packets
+	c.SetWriteDeadline(time.Now().Add(30 * time.Millisecond))
+	start := time.Now()
+	n, err := c.Write(make([]byte, 3*1316))
+	if n != 1316 || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("write into a full buffer: %d %v", n, err)
+	}
+	if time.Since(start) < 30*time.Millisecond {
+		t.Fatal("gave up before the deadline")
+	}
+	// a deadline already past takes what fits without waiting
+	c.SetWriteDeadline(time.Now().Add(-time.Second))
+	if n, err := c.Write(make([]byte, 1316)); n != 0 || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("write past the deadline: %d %v", n, err)
+	}
+
+	c.SetWriteDeadline(time.Time{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Write(make([]byte, 1316))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("write did not wait: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	ackUpTo(c, 101)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the ACK did not wake the write")
+	}
+}
+
+// With MaxSendDelay, Write waits while the oldest unacknowledged packet is
+// that old, however little is buffered.
+func TestMaxSendDelayHoldsWrite(t *testing.T) {
+	c, _ := testConnWith(t, Config{PeerIdleTimeout: time.Minute, MaxSendDelay: 20 * time.Millisecond}, nil)
+	c.Write(make([]byte, 1316))
+	if n, err := c.Write(make([]byte, 1316)); n != 1316 || err != nil {
+		t.Fatalf("a young packet held the write back: %d %v", n, err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	c.SetWriteDeadline(time.Now().Add(20 * time.Millisecond))
+	if n, err := c.Write(make([]byte, 1316)); n != 0 || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("write behind an old packet: %d %v", n, err)
+	}
+	ackUpTo(c, 102)
+	if n, err := c.Write(make([]byte, 1316)); n != 1316 || err != nil {
+		t.Fatalf("write after the ACK: %d %v", n, err)
+	}
+}
+
+// Closing the connection ends a Write waiting for room.
+func TestCloseEndsWaitingWrite(t *testing.T) {
+	c, _ := testConnWith(t, Config{PeerIdleTimeout: time.Minute, SendBufferSize: 1316}, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Write(make([]byte, 100*1316))
+		done <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	go c.Close()
+	select {
+	case err := <-done:
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("write ended with %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("write still waiting after Close")
+	}
+}
+
+// Done and Err tell when and why a connection closed, and Write returns
+// the same reason.
+func TestCloseReasons(t *testing.T) {
+	caller, accepted := pair(t, ListenConfig{}, Config{}, 0)
+	if err := caller.Err(); err != nil {
+		t.Fatalf("open connection: %v", err)
+	}
+	caller.Close()
+	if err := caller.Err(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("after Close: %v", err)
+	}
+	if _, err := caller.Write([]byte("x")); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("write after Close: %v", err)
+	}
+	select {
+	case <-accepted.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("peer shutdown not seen")
+	}
+	if err := accepted.Err(); err != ErrPeerShutdown {
+		t.Fatalf("peer shutdown: %v", err)
+	}
+	if _, err := accepted.Write([]byte("x")); err != ErrPeerShutdown {
+		t.Fatalf("write after peer shutdown: %v", err)
+	}
+	if _, err := accepted.Read(make([]byte, 1500)); err != io.EOF {
+		t.Fatalf("read after peer shutdown: %v", err)
+	}
+
+	idle, _ := testConnWith(t, Config{PeerIdleTimeout: 50 * time.Millisecond}, nil)
+	select {
+	case <-idle.Done():
+	case <-time.After(time.Second):
+		t.Fatal("silent peer not given up")
+	}
+	if err := idle.Err(); err != ErrPeerIdle {
+		t.Fatalf("silent peer: %v", err)
+	}
+}
+
+func TestMaxSendDelayLimits(t *testing.T) {
+	if _, err := (Config{MaxSendDelay: 60 * time.Millisecond}).withDefaults(); err != nil {
+		t.Fatal(err)
+	}
+	// packets are kept 170 ms with the default 120 ms latency
+	for _, d := range []time.Duration{-time.Millisecond, 170 * time.Millisecond} {
+		if _, err := (Config{MaxSendDelay: d}).withDefaults(); err == nil {
+			t.Errorf("MaxSendDelay %v accepted", d)
+		}
+	}
+}
+
+// newThrottledProxy relays UDP between a client and a server like a narrow
+// link: the client's packets queue up and leave at rate a second, and what
+// does not fit in the queue is lost. The way back is not limited.
+func newThrottledProxy(t *testing.T, server string, rate, queue int) string {
+	t.Helper()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saddr, _ := net.ResolveUDPAddr("udp", server)
+	toSrv, err := net.DialUDP("udp", nil, saddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan struct{})
+	t.Cleanup(func() { close(closed); conn.Close(); toSrv.Close() })
+
+	var mu sync.Mutex
+	var client *net.UDPAddr
+	q := make(chan []byte, queue)
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			n, from, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			client = from
+			mu.Unlock()
+			select {
+			case q <- append([]byte(nil), buf[:n]...):
+			default:
+			}
+		}
+	}()
+	go func() {
+		// a token bucket topped up every millisecond; sleeping per packet
+		// would run the link slower than rate
+		tick := time.NewTicker(time.Millisecond)
+		defer tick.Stop()
+		start := time.Now()
+		sent := 0
+		for {
+			select {
+			case <-closed:
+				return
+			case now := <-tick.C:
+				due := int(now.Sub(start).Seconds() * float64(rate))
+				sent = max(sent, due-4) // an idle link saves up no more than a few packets
+				for sent < due {
+					select {
+					case b := <-q:
+						toSrv.Write(b)
+						sent++
+						continue
+					default:
+					}
+					break
+				}
+			}
+		}
+	}()
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			n, err := toSrv.Read(buf)
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			if err != nil {
+				continue
+			}
+			mu.Lock()
+			to := client
+			mu.Unlock()
+			if to != nil {
+				conn.WriteToUDP(buf[:n], to)
+			}
+		}
+	}()
+	return conn.LocalAddr().String()
+}
+
+// slowLinkRun sends n messages paced at twice what the link carries and
+// reports how many arrived before the first gap, and the sender's stats.
+func slowLinkRun(t *testing.T, maxSendDelay time.Duration) (inOrder int, sender Stats) {
+	const (
+		n        = 1000
+		linkRate = 1000 // packets a second
+		latency  = 200 * time.Millisecond
+	)
+	l, err := Listen("127.0.0.1:0", ListenConfig{Config: Config{Latency: latency}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	accepted := make(chan *Conn, 1)
+	go func() {
+		c, _ := l.Accept()
+		accepted <- c
+	}()
+	addr := newThrottledProxy(t, l.Addr().String(), linkRate, 256)
+	caller, err := Dial(addr, Config{Latency: latency, MaxSendDelay: maxSendDelay})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { caller.Close() })
+	var to *Conn
+	select {
+	case to = <-accepted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("nothing accepted")
+	}
+
+	go func() {
+		tick := time.NewTicker(time.Millisecond)
+		defer tick.Stop()
+		msg := make([]byte, 1316)
+		for i := 0; i < n; {
+			<-tick.C
+			for k := 0; k < 2*linkRate/1000 && i < n; k, i = k+1, i+1 {
+				binaryPut(msg, i)
+				if _, err := caller.Write(msg); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	buf := make([]byte, 1500)
+	to.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for inOrder < n {
+		k, err := to.Read(buf)
+		if err != nil || k != 1316 || binaryGet(buf) != inOrder {
+			break
+		}
+		inOrder++
+	}
+	return inOrder, caller.Stats()
+}
+
+// A live sender producing twice what its link carries is held back by
+// MaxSendDelay instead of losing packets: nothing is given up and every
+// message arrives, in order, at the pace of the link. Without it the same
+// stream loses packets.
+func TestMaxSendDelayOnSlowLink(t *testing.T) {
+	got, s := slowLinkRun(t, 100*time.Millisecond)
+	if got != 1000 || s.PacketsSendDropped != 0 {
+		t.Fatalf("with MaxSendDelay: %d messages in order, sender %+v", got, s)
+	}
+	if got, s := slowLinkRun(t, 0); got == 1000 {
+		t.Fatalf("without MaxSendDelay nothing was lost, the link is not narrow enough: sender %+v", s)
 	}
 }

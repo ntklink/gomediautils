@@ -59,3 +59,4 @@ See the [RTMP usage guide](go-rtmp/README.md) for more details.
 - Loss recovery: ACK/ACKACK round trip timing, immediate and periodic NAK, retransmission, too-late packet drop within the negotiated latency
 - AES-128/192/256 encryption from a passphrase (PBKDF2, RFC 3394 key wrap, AES-CTR)
 - `Conn` is a `net.Conn`; its reads form a byte stream the MPEG-TS demuxer consumes directly
+- Sender backpressure: `Write` waits for room in a bounded send buffer, and with `MaxSendDelay` while the link falls behind, so a live source can drop whole GOPs upstream instead of losing packets mid-GOP; write deadlines, `Done`/`Err` and typed close reasons
