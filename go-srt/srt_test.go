@@ -477,6 +477,40 @@ func TestTailResentBeforeDropped(t *testing.T) {
 	}
 }
 
+// A live stream pauses between frames. With a short round trip the ACK
+// for the last packets of a frame comes an ACK interval later than the
+// round trip alone; that is no loss, and nothing is sent again.
+func TestTailNotResentWhileACKDue(t *testing.T) {
+	c, sent := testConn(t, nil)
+	// the receiver measured a 10 ms round trip
+	ack := binary.BigEndian.AppendUint32(nil, 100)
+	ack = binary.BigEndian.AppendUint32(ack, 10000)
+	c.handlePacket(&packet{control: true, ctrlType: ctrlACK, typeInfo: 1, payload: append(ack, make([]byte, 20)...)})
+
+	c.Write(make([]byte, 3*1316))
+	// the round trip and one ACK interval, with some slack
+	time.Sleep(10*time.Millisecond + ackInterval + 10*time.Millisecond)
+	ackUpTo(c, 103)
+	for _, raw := range sent() {
+		if p, err := parsePacket(raw); err == nil && !p.control && p.retransmit {
+			t.Fatalf("packet %d sent again before its ACK was due", p.seq)
+		}
+	}
+
+	// a tail that really went missing is still sent again in time
+	c.Write(make([]byte, 1316))
+	time.Sleep(c.sendHoldLimit() / 2)
+	resent := false
+	for _, raw := range sent() {
+		if p, err := parsePacket(raw); err == nil && !p.control && p.retransmit && p.seq == 103 {
+			resent = true
+		}
+	}
+	if !resent {
+		t.Fatal("lost tail not sent again")
+	}
+}
+
 // A packet the socket refuses (ENOBUFS, a network change) is a lost packet:
 // Write carries on, the sequence numbers stay consecutive, and a NAK for
 // the refused packet resends the right one. A refused retransmission

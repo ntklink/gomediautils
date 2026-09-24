@@ -1007,9 +1007,13 @@ func (c *Conn) resendTail(now time.Time) {
 	if len(c.sndBuf) == 0 {
 		return
 	}
-	// the retry has to come well before dropOldSent lets go of the packets,
-	// even while the round trip is still the initial 100 ms guess
-	wait := min(max(c.rtt+4*c.rttVar, minNakInterval), c.sendHoldLimit()/2)
+	// an ACK comes up to one ACK interval after the packets it covers, so
+	// the wait allows for that on top of the round trip, as libsrt does
+	// (RTT + 4 RTTVar + 3 SYN); without it every pause in a live stream,
+	// between frames, resends the last packets although nothing was lost.
+	// The retry still has to come well before dropOldSent lets go of the
+	// packets, even while the round trip is still the initial 100 ms guess
+	wait := min(max(c.rtt+4*c.rttVar+3*ackInterval, minNakInterval), c.sendHoldLimit()/2)
 	if now.Sub(c.ackMoved) < wait || now.Sub(c.lastData) < wait {
 		return
 	}
