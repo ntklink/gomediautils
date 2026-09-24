@@ -184,6 +184,7 @@ type H265RawSPS struct {
 	Ptl                                      ProfileTierLevel
 	Sps_seq_parameter_set_id                 uint64
 	Chroma_format_idc                        uint64
+	Separate_colour_plane_flag               uint8
 	Pic_width_in_luma_samples                uint64
 	Pic_height_in_luma_samples               uint64
 	Conformance_window_flag                  uint8
@@ -212,7 +213,7 @@ func (sps *H265RawSPS) Decode(nalu []byte) error {
 	sps.Sps_seq_parameter_set_id = bs.ReadUE()
 	sps.Chroma_format_idc = bs.ReadUE()
 	if sps.Chroma_format_idc == 3 {
-		bs.SkipBits(1)
+		sps.Separate_colour_plane_flag = bs.GetBit()
 	}
 	sps.Pic_width_in_luma_samples = bs.ReadUE()
 	sps.Pic_height_in_luma_samples = bs.ReadUE()

@@ -110,6 +110,7 @@ the source file would be measuring that instead.
 
 | example | what the test drives |
 | --- | --- |
+| `mux_mkv` | bare h264/h265/aac/mp3/g711 streams read by go-es into matroska: b frame timestamps from the picture order count, multi slice pictures |
 | `mux_ts` | ts muxer fed a bare Annex-B stream |
 | `mux_ts_aac` | audio only ts, where the pcr has to ride on the audio pid |
 | `mux_ts_mp3` | mp3 in ts, constant and variable bitrate |
