@@ -225,7 +225,7 @@ type Conn struct {
 	// the write deadline moves: every Write waiting for room looks again
 	sendWake      chan struct{}
 	writeDeadline time.Time
-	closing       bool // Close is letting the last packets go out
+	closing       bool // Close was called; the last packets written may still be going out
 	closed        bool
 	closeErr      error
 	done          chan struct{}
@@ -483,10 +483,18 @@ func (c *Conn) releaseSent(n int) {
 // comes with the next Read. A Read never returns parts of two messages, so
 // a buffer of PayloadSize bytes reads one message per call, and anything
 // consuming an io.Reader (an MPEG-TS demuxer, io.Copy) can read a stream
-// of messages as one byte stream.
+// of messages as one byte stream. Once the peer shuts the connection down,
+// what arrived is still read before io.EOF; once Close is called, Read
+// fails with net.ErrClosed at once and what was not read is dropped.
 func (c *Conn) Read(b []byte) (int, error) {
 	for {
 		c.mu.Lock()
+		if c.closing {
+			c.mu.Unlock()
+			// pass the wake-up of Close on to the next Read waiting
+			c.notify()
+			return 0, net.ErrClosed
+		}
 		if len(c.ready) > 0 {
 			msg := c.ready[0]
 			n := copy(b, msg)
@@ -563,12 +571,19 @@ func (c *Conn) notify() {
 // last packets written the time the latency allows: to be acknowledged,
 // and to be played out, since a libsrt receiver throws away what it still
 // holds when the shutdown arrives. A connection idle for longer than the
-// latency closes at once. Writes fail from the moment Close is called.
+// latency closes at once. From the moment Close is called the application
+// is done with the connection both ways: writes and reads fail, and what
+// the peer sends is dropped.
 func (c *Conn) Close() error {
 	c.mu.Lock()
-	if !c.closing && !c.closed {
+	if !c.closing {
 		c.closing = true
 		c.wakeWriters()
+		clear(c.rcvBuf)
+		clear(c.loss)
+		c.rcvNext = seqNext(c.rcvMax)
+		c.ready = nil
+		c.notify()
 	}
 	linger := time.Now().Add(c.sndLatency + max(3*c.rtt, 100*time.Millisecond))
 	for !c.closed && time.Now().Before(linger) &&
@@ -646,7 +661,11 @@ func (c *Conn) handlePacket(p *packet) {
 	}
 	c.lastRecv = now
 	if !p.control {
-		c.handleData(p, now)
+		// after Close nothing reads it; the control packets still count,
+		// the last packets written go out on them
+		if !c.closing {
+			c.handleData(p, now)
+		}
 		return
 	}
 	switch p.ctrlType {
