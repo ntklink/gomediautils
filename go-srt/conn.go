@@ -95,7 +95,18 @@ type Stats struct {
 	// PacketsSendDropped is how many packets the sender stopped holding
 	// for retransmission because they were too old to arrive in time.
 	PacketsSendDropped uint64
-	RTT                time.Duration
+	// SendErrors is how many packets the socket refused to send (ENOBUFS,
+	// a network change, ...). They are counted as lost and recovered by
+	// retransmission like a packet lost on the way.
+	SendErrors uint64
+	// SendBuffered is how many sent packets the peer has not acknowledged
+	// yet, and SendBufferDelay how long the oldest of them has waited. On a
+	// healthy link they stay around one round trip's worth; growing towards
+	// the latency they are the early sign of congestion that Write, which
+	// never blocks, does not give. PacketsSendDropped is the late one.
+	SendBuffered    int
+	SendBufferDelay time.Duration
+	RTT             time.Duration
 }
 
 type sentPacket struct {
@@ -236,6 +247,10 @@ func (c *Conn) Stats() Stats {
 	defer c.mu.Unlock()
 	s := c.stats
 	s.RTT = c.rtt
+	s.SendBuffered = len(c.sndBuf)
+	if len(c.sndBuf) > 0 {
+		s.SendBufferDelay = time.Since(c.sndBuf[0].sentAt)
+	}
 	return s
 }
 
@@ -255,7 +270,12 @@ func (c *Conn) sendControl(typ uint16, subtype uint16, typeInfo uint32, cif []by
 }
 
 // Write sends b as one message, or as several of PayloadSize bytes when it
-// is longer. It never blocks on the network.
+// is longer. Like libsrt in live mode it never blocks and does not report
+// congestion or a failed send: a packet the socket refuses counts as lost
+// and is sent again when the peer asks, and a packet still unacknowledged
+// after the latency is given up. Stats shows both, for a sender that wants
+// to know its link is falling behind. Write only fails once the connection
+// is closed.
 func (c *Conn) Write(b []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -280,11 +300,16 @@ func (c *Conn) Write(b []byte) (int, error) {
 			}
 		}
 		raw := p.marshal()
+		// the packet takes its sequence number whether or not the socket
+		// takes it: the send buffer must hold consecutive numbers for NAKs
+		// to find what to resend, and a packet that failed to go out is
+		// just a lost one to the receiver, which asks for it again
 		c.sndBuf = append(c.sndBuf, &sentPacket{seq: p.seq, raw: raw, sentAt: now})
 		if err := c.send(raw); err != nil {
-			return off, err
+			c.stats.SendErrors++
+		} else {
+			c.stats.PacketsSent++
 		}
-		c.stats.PacketsSent++
 		c.lastSend = now
 		c.lastData = now
 		c.nextSeq = seqNext(c.nextSeq)

@@ -2,6 +2,7 @@ package srt
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -461,5 +463,77 @@ func TestTailResentBeforeDropped(t *testing.T) {
 	}
 	if resent == 0 {
 		t.Fatal("unacknowledged tail dropped without being sent again")
+	}
+}
+
+// A packet the socket refuses (ENOBUFS, a network change) is a lost packet:
+// Write carries on, the sequence numbers stay consecutive, and a NAK for
+// the refused packet resends the right one.
+func TestFailedSendIsRecoveredAsLoss(t *testing.T) {
+	var mu sync.Mutex
+	var sent [][]byte
+	calls := 0
+	c := newConn(Config{PayloadSize: 1316, PeerIdleTimeout: time.Minute}, connParams{
+		socketID: 1, peerSocketID: 2, isn: 100,
+		rcvLatency: 120 * time.Millisecond, sndLatency: 120 * time.Millisecond,
+	}, func(b []byte) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 2 {
+			return syscall.ENOBUFS
+		}
+		sent = append(sent, append([]byte(nil), b...))
+		return nil
+	}, nil, time.Now())
+	defer func() {
+		c.mu.Lock()
+		c.closeLocked(nil)
+		c.mu.Unlock()
+	}()
+
+	for i := 0; i < 5; i++ {
+		if _, err := c.Write([]byte{byte(i)}); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+	c.mu.Lock()
+	var seqs []uint32
+	for _, sp := range c.sndBuf {
+		seqs = append(seqs, sp.seq)
+	}
+	c.mu.Unlock()
+	if fmt.Sprint(seqs) != "[100 101 102 103 104]" {
+		t.Fatalf("send buffer holds %v, want five consecutive numbers", seqs)
+	}
+	if s := c.Stats(); s.SendErrors != 1 || s.PacketsSent != 4 {
+		t.Fatalf("stats %+v", s)
+	}
+
+	// the receiver sees 102 after 100 and asks for 101
+	c.handlePacket(&packet{control: true, ctrlType: ctrlNAK, payload: encodeLossList([]uint32{101})})
+	mu.Lock()
+	last := sent[len(sent)-1]
+	mu.Unlock()
+	p, err := parsePacket(last)
+	if err != nil || p.control || !p.retransmit || p.seq != 101 || p.payload[0] != 1 {
+		t.Fatalf("resent %+v", p)
+	}
+}
+
+// What is sent and not acknowledged shows in Stats, so a sender can see
+// its link fall behind before packets are given up.
+func TestSendBufferStats(t *testing.T) {
+	c, _ := testConn(t, nil)
+	c.Write(make([]byte, 3*1316))
+	time.Sleep(20 * time.Millisecond)
+	s := c.Stats()
+	if s.SendBuffered != 3 || s.SendBufferDelay < 20*time.Millisecond {
+		t.Fatalf("stats %+v", s)
+	}
+	ack := binary.BigEndian.AppendUint32(nil, 103)
+	c.handlePacket(&packet{control: true, ctrlType: ctrlACK, typeInfo: 1, payload: append(ack, make([]byte, 24)...)})
+	if s := c.Stats(); s.SendBuffered != 0 || s.SendBufferDelay != 0 {
+		t.Fatalf("after the ACK: %+v", s)
 	}
 }
