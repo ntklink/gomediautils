@@ -95,8 +95,8 @@ func TestProbe(t *testing.T) {
 // Access units split where a new picture starts: parameter sets and an AUD
 // go with the slice after them, a second slice of the same picture stays.
 func TestH264AccessUnits(t *testing.T) {
-	idr := []byte{0, 0, 1, 0x65, 0x88, 0x84}        // first_mb_in_slice 0
-	idrSlice2 := []byte{0, 0, 1, 0x65, 0x40, 0x84}  // first_mb_in_slice 1
+	idr := []byte{0, 0, 1, 0x65, 0x88, 0x84}       // first_mb_in_slice 0
+	idrSlice2 := []byte{0, 0, 1, 0x65, 0x40, 0x84} // first_mb_in_slice 1
 	nonIdr := []byte{0, 0, 0, 1, 0x41, 0x9a, 0x21} // first_mb_in_slice 0
 	aud := []byte{0, 0, 0, 1, 0x09, 0xf0}
 	var stream []byte
