@@ -180,7 +180,8 @@ readLoop:
 			mov_tag([4]byte{'s', 't', 'b', 'l'}), mov_tag([4]byte{'a', 'v', 'c', '1'}),
 			mov_tag([4]byte{'h', 'v', 'c', '1'}), mov_tag([4]byte{'h', 'e', 'v', '1'}),
 			mov_tag([4]byte{'m', 'p', '4', 'a'}), mov_tag([4]byte{'u', 'l', 'a', 'w'}),
-			mov_tag([4]byte{'a', 'l', 'a', 'w'}), mov_tag([4]byte{'o', 'p', 'u', 's'}),
+			mov_tag([4]byte{'a', 'l', 'a', 'w'}), mov_tag([4]byte{'O', 'p', 'u', 's'}),
+			mov_tag([4]byte{'o', 'p', 'u', 's'}),
 			mov_tag([4]byte{'d', 'O', 'p', 's'}):
 			needTrack = true
 		}
@@ -281,7 +282,9 @@ readLoop:
 		case mov_tag([4]byte{'a', 'l', 'a', 'w'}):
 			track.cid = MP4_CODEC_G711A
 			err = decodeAudioSampleEntry(demuxer)
-		case mov_tag([4]byte{'o', 'p', 'u', 's'}):
+		case mov_tag([4]byte{'O', 'p', 'u', 's'}), mov_tag([4]byte{'o', 'p', 'u', 's'}):
+			// Opus is the registered name; older files of this package wrote
+			// it in lower case
 			track.cid = MP4_CODEC_OPUS
 			track.extra = new(opusExtraData)
 			err = decodeAudioSampleEntry(demuxer)

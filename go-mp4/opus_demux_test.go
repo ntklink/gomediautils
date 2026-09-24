@@ -92,3 +92,35 @@ func testOpusDemuxRoundTrip(t *testing.T, head []byte, flag MP4_FLAG) {
 		}
 	}
 }
+
+// The sample entry is registered as Opus. Files written by ffmpeg use that
+// spelling, and files written by older versions of this package the lower
+// case one; both have to be read.
+func TestOpusSampleEntryName(t *testing.T) {
+	ws := newMemWriteSeeker()
+	muxer, err := CreateMp4Muxer(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := opusTestHead(2, 312, 48000)
+	tid, _ := muxer.AddAudioTrack(MP4_CODEC_OPUS, WithExtraData(head))
+	if err := muxer.Write(tid, []byte{0xfc, 1}, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := muxer.WriteTrailer(); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(ws.buf, []byte("Opus")) {
+		t.Fatal("muxer did not write an Opus sample entry")
+	}
+	for _, name := range []string{"Opus", "opus"} {
+		file := bytes.Replace(ws.buf, []byte("Opus"), []byte(name), 1)
+		infos, err := CreateMp4Demuxer(bytes.NewReader(file)).ReadHead()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(infos) != 1 || infos[0].Cid != MP4_CODEC_OPUS || infos[0].ChannelCount != 2 {
+			t.Fatalf("%s: %+v", name, infos)
+		}
+	}
+}

@@ -52,7 +52,9 @@ func getCodecNameWithCodecId(cid MP4_CODEC_TYPE) ([4]byte, error) {
 	case MP4_CODEC_G711U:
 		return [4]byte{'u', 'l', 'a', 'w'}, nil
 	case MP4_CODEC_OPUS:
-		return [4]byte{'o', 'p', 'u', 's'}, nil
+		// "Encapsulation of Opus in ISO Base Media File Format" names the
+		// sample entry Opus; browsers reject the lower case spelling
+		return [4]byte{'O', 'p', 'u', 's'}, nil
 	default:
 		return [4]byte{}, unsupportedCodec(cid)
 	}
