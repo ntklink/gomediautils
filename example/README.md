@@ -93,6 +93,7 @@ the source file would be measuring that instead.
 | `convert_mkv_to_mp4` | matroska demuxer + mp4 muxer: decode times for b frames, live files with unknown sizes, mkvmerge lacing, zlib and block groups |
 | `convert_flv_to_wav` | g711 out of an flv (a camera's rtmp stream) into a wav file |
 | `convert_wav_to_mkv` | a g711 wav read by go-wav as an es.Reader, muxed into matroska |
+| `convert_mkv_to_opus` | opus out of webm/matroska into an ogg opus file: pre-skip, paging and end trimming decode to the same samples |
 | `remux_webm` | vp8 and opus through the demuxer and the webm muxer, as a file with cues and as a live stream |
 
 ### demuxers

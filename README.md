@@ -29,7 +29,7 @@ See the [codec usage guide](go-codec/README.md) for more details.
 | fMP4 | H.264, H.265, AAC, G.711 A-law, G.711 μ-law | H.264, H.265, AAC, G.711 A-law, G.711 μ-law |
 | Matroska (MKV) | H.264, H.265, VP8, AAC, Opus, MP3, G.711 A-law, G.711 μ-law | H.264, H.265, VP8, AAC, Opus, MP3, G.711 A-law, G.711 μ-law |
 | WebM | VP8, Opus | VP8, Opus |
-| Ogg | — | Opus, VP8 |
+| Ogg | Opus | Opus, VP8 |
 | WAV | G.711 A-law, G.711 μ-law (and PCM / float samples) | G.711 A-law, G.711 μ-law (and PCM / float samples) |
 | Elementary stream | H.264 / H.265 (Annex-B), AAC (ADTS), MP3, G.711 | H.264 / H.265 (Annex-B), AAC (ADTS), MP3, G.711 |
 
