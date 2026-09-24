@@ -388,7 +388,78 @@ func TestParseStreamID(t *testing.T) {
 	if info.Resource != "live/cam1" || info.Mode != "publish" || info.User != "alice" || info.Params["x"] != "1" {
 		t.Fatalf("%+v", info)
 	}
-	if info := ParseStreamID("live/cam2"); info.Resource != "live/cam2" || info.Mode != "request" {
+	if info.Type != "stream" {
+		t.Fatalf("type %q, want the default stream", info.Type)
+	}
+	if info := ParseStreamID("live/cam2"); info.Resource != "live/cam2" || info.Mode != "request" || info.Type != "stream" {
 		t.Fatalf("%+v", info)
+	}
+}
+
+// testConn is a connection whose packets go to a slice instead of a socket.
+func testConn(t *testing.T, crypto *cryptoCtx) (*Conn, func() [][]byte) {
+	t.Helper()
+	var mu sync.Mutex
+	var sent [][]byte
+	c := newConn(Config{PayloadSize: 1316, PeerIdleTimeout: time.Minute}, connParams{
+		socketID: 1, peerSocketID: 2, isn: 100, crypto: crypto,
+		rcvLatency: 120 * time.Millisecond, sndLatency: 120 * time.Millisecond,
+	}, func(b []byte) error {
+		mu.Lock()
+		sent = append(sent, append([]byte(nil), b...))
+		mu.Unlock()
+		return nil
+	}, nil, time.Now())
+	t.Cleanup(func() {
+		c.mu.Lock()
+		c.closeLocked(nil)
+		c.mu.Unlock()
+	})
+	return c, func() [][]byte {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([][]byte(nil), sent...)
+	}
+}
+
+// An encrypted connection delivers only packets encrypted with its keys,
+// and a clear one only clear packets: nothing injected in the other form
+// reaches the application.
+func TestCryptoModeMustMatch(t *testing.T) {
+	ctx, _ := newCryptoCtx("0123456789abcdef", 16)
+	for name, tc := range map[string]struct {
+		crypto   *cryptoCtx
+		keyFlags byte
+	}{
+		"clear packet, encrypted connection": {ctx, 0},
+		"encrypted packet, clear connection": {nil, 1},
+	} {
+		c, _ := testConn(t, tc.crypto)
+		p := &packet{seq: 100, position: positionSolo, msgNo: 1, keyFlags: tc.keyFlags, payload: []byte("injected")}
+		c.handlePacket(p)
+		c.mu.Lock()
+		got := len(c.rcvBuf) + len(c.ready)
+		c.mu.Unlock()
+		if got != 0 {
+			t.Errorf("%s: packet accepted", name)
+		}
+	}
+}
+
+// The last packets of a burst are sent again before the sender lets go of
+// them, even while the round trip is still the initial 100 ms guess: no
+// later packet will reveal their loss to the receiver.
+func TestTailResentBeforeDropped(t *testing.T) {
+	c, sent := testConn(t, nil)
+	c.Write(make([]byte, 3*1316))
+	time.Sleep(c.sendHoldLimit() + 50*time.Millisecond)
+	resent := 0
+	for _, raw := range sent() {
+		if p, err := parsePacket(raw); err == nil && !p.control && p.retransmit {
+			resent++
+		}
+	}
+	if resent == 0 {
+		t.Fatal("unacknowledged tail dropped without being sent again")
 	}
 }

@@ -530,10 +530,14 @@ func (c *Conn) handleData(p *packet, now time.Time) {
 		return
 	}
 	payload := append([]byte(nil), p.payload...)
-	if p.keyFlags != 0 {
-		if c.crypto == nil || c.crypto.xorPayload(p.keyFlags, p.seq, payload) != nil {
-			return
-		}
+	// an encrypted connection takes encrypted packets only and a clear one
+	// clear packets only: libsrt encrypts every data packet once keys are
+	// agreed, so anything else is not from the peer
+	if (c.crypto != nil) != (p.keyFlags != 0) {
+		return
+	}
+	if p.keyFlags != 0 && c.crypto.xorPayload(p.keyFlags, p.seq, payload) != nil {
+		return
 	}
 	c.stats.PacketsReceived++
 	c.rcvPkts++
@@ -783,7 +787,9 @@ func (c *Conn) resendTail(now time.Time) {
 	if len(c.sndBuf) == 0 {
 		return
 	}
-	wait := max(c.rtt+4*c.rttVar, minNakInterval)
+	// the retry has to come well before dropOldSent lets go of the packets,
+	// even while the round trip is still the initial 100 ms guess
+	wait := min(max(c.rtt+4*c.rttVar, minNakInterval), c.sendHoldLimit()/2)
 	if now.Sub(c.ackMoved) < wait || now.Sub(c.lastData) < wait {
 		return
 	}
@@ -801,10 +807,15 @@ func (c *Conn) resendTail(now time.Time) {
 	c.ackMoved = now
 }
 
+// sendHoldLimit is how long a sent packet is kept for retransmission.
+func (c *Conn) sendHoldLimit() time.Duration {
+	return max(c.sndLatency+c.sndLatency/4+20*time.Millisecond, 100*time.Millisecond)
+}
+
 // dropOldSent stops holding packets that could no longer arrive before
 // the peer plays past them.
 func (c *Conn) dropOldSent(now time.Time) {
-	limit := max(c.sndLatency+c.sndLatency/4+20*time.Millisecond, 100*time.Millisecond)
+	limit := c.sendHoldLimit()
 	for len(c.sndBuf) > 0 && now.Sub(c.sndBuf[0].sentAt) > limit {
 		c.sndBuf[0] = nil
 		c.sndBuf = c.sndBuf[1:]
