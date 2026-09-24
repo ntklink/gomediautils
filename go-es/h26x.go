@@ -201,8 +201,8 @@ func (v *videoReader) finishAU() {
 	if pic.newPeriod {
 		v.period++
 	}
-	// streams whose picture order follows decode order (H.264 poc types 1
-	// and 2 as parsed here) are ordered by their position
+	// streams whose picture order follows decode order (H.264 poc type 2,
+	// field pictures) are ordered by their position
 	poc := pic.poc
 	if !pic.hasPoc {
 		poc = v.counter
@@ -236,6 +236,9 @@ type h264Parser struct {
 
 	prevPocMsb int64
 	prevPocLsb int64
+	// poc type 1 state (8.2.1.2)
+	prevFrameNum       int64
+	prevFrameNumOffset int64
 }
 
 func newH264Parser() *h264Parser {
@@ -299,6 +302,10 @@ func (p *h264Parser) slice(nalu []byte) picture {
 	pic := picture{key: idr, newPeriod: idr}
 	bs := codec.NewBitStream(codec.CovertRbspToSodb(nalu[1:]))
 	pic.firstSlice = bs.ReadUE() == 0
+	if !pic.firstSlice {
+		// only the first slice places the picture
+		return pic
+	}
 	bs.ReadUE() // slice_type
 	pps, ok := p.ppss[bs.ReadUE()]
 	if !ok {
@@ -311,7 +318,7 @@ func (p *h264Parser) slice(nalu []byte) picture {
 	if sps.Separate_colour_plane_flag == 1 {
 		bs.SkipBits(2)
 	}
-	bs.SkipBits(int(sps.Log2_max_frame_num_minus4 + 4)) // frame_num
+	frameNum := int64(bs.GetBits(int(sps.Log2_max_frame_num_minus4 + 4)))
 	if sps.Frame_mbs_only_flag == 0 && bs.GetBit() == 1 {
 		// a field picture: its fields are placed by decode order
 		return pic
@@ -319,13 +326,27 @@ func (p *h264Parser) slice(nalu []byte) picture {
 	if idr {
 		bs.ReadUE() // idr_pic_id
 	}
-	if sps.Pic_order_cnt_type != 0 {
+	var poc int64
+	switch sps.Pic_order_cnt_type {
+	case 0:
+		poc = p.pocType0(sps, bs, idr, refIdc)
+	case 1:
+		poc = p.pocType1(sps, pps, bs, idr, refIdc, frameNum)
+	default:
+		// type 2 outputs in decode order: nothing to reorder
 		return pic
 	}
-	lsb := int64(bs.GetBits(int(sps.Log2_max_pic_order_cnt_lsb_minus4 + 4)))
 	if bs.Err() != nil {
 		return pic
 	}
+	pic.poc, pic.hasPoc = poc, true
+	return pic
+}
+
+// pocType0 derives the picture order count from pic_order_cnt_lsb and the
+// msb carried over from the previous reference picture (8.2.1.1).
+func (p *h264Parser) pocType0(sps *codec.SPS, bs *codec.BitStream, idr bool, refIdc byte) int64 {
+	lsb := int64(bs.GetBits(int(sps.Log2_max_pic_order_cnt_lsb_minus4 + 4)))
 	maxLsb := int64(1) << (sps.Log2_max_pic_order_cnt_lsb_minus4 + 4)
 	if idr {
 		p.prevPocMsb, p.prevPocLsb = 0, 0
@@ -340,8 +361,58 @@ func (p *h264Parser) slice(nalu []byte) picture {
 	if refIdc != 0 {
 		p.prevPocMsb, p.prevPocLsb = msb, lsb
 	}
-	pic.poc, pic.hasPoc = msb+lsb, true
-	return pic
+	return msb + lsb
+}
+
+// pocType1 derives the picture order count from frame_num and the expected
+// cycle of reference picture offsets in the SPS (8.2.1.2). Unlike type 2
+// it lets non-reference pictures be shown out of decode order, so b frames
+// need it.
+func (p *h264Parser) pocType1(sps *codec.SPS, pps *codec.PPS, bs *codec.BitStream, idr bool, refIdc byte, frameNum int64) int64 {
+	var delta0, delta1 int64
+	if sps.Delta_pic_order_always_zero_flag == 0 {
+		delta0 = bs.ReadSE()
+		if pps.Bottom_field_pic_order_in_frame_present_flag == 1 {
+			delta1 = bs.ReadSE()
+		}
+	}
+	maxFrameNum := int64(1) << (sps.Log2_max_frame_num_minus4 + 4)
+	var frameNumOffset int64
+	switch {
+	case idr:
+	case p.prevFrameNum > frameNum:
+		frameNumOffset = p.prevFrameNumOffset + maxFrameNum
+	default:
+		frameNumOffset = p.prevFrameNumOffset
+	}
+	p.prevFrameNum, p.prevFrameNumOffset = frameNum, frameNumOffset
+
+	cycle := int64(len(sps.Offset_for_ref_frame))
+	var absFrameNum int64
+	if cycle != 0 {
+		absFrameNum = frameNumOffset + frameNum
+	}
+	if refIdc == 0 && absFrameNum > 0 {
+		absFrameNum--
+	}
+	var expected int64
+	if absFrameNum > 0 {
+		var perCycle int64
+		for _, off := range sps.Offset_for_ref_frame {
+			perCycle += off
+		}
+		cycles, inCycle := (absFrameNum-1)/cycle, (absFrameNum-1)%cycle
+		expected = cycles * perCycle
+		for i := int64(0); i <= inCycle; i++ {
+			expected += sps.Offset_for_ref_frame[i]
+		}
+	}
+	if refIdc == 0 {
+		expected += sps.Offset_for_non_ref_pic
+	}
+	top := expected + delta0
+	bottom := top + sps.Offset_for_top_to_bottom_field + delta1
+	return min(top, bottom)
 }
 
 type h265Parser struct {

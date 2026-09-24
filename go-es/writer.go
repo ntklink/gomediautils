@@ -116,20 +116,35 @@ func (wr *Writer) annexB(frame []byte) ([]byte, error) {
 	} else if !ok {
 		return nil, errors.New("es: frame is neither Annex-B nor length prefixed")
 	}
-	key, hasSPS := false, false
+	// a key frame gets the parameter sets from the extra data unless it
+	// carries every one a decoder needs: SPS and PPS, and a VPS for H.265
+	var key, vps, sps, pps bool
 	for _, nalu := range nalus {
 		if h265 {
-			t := codec.H265NaluTypeWithoutStartCode(nalu)
-			key = key || (t >= codec.H265_NAL_SLICE_BLA_W_LP && t <= codec.H265_NAL_SLICE_CRA)
-			hasSPS = hasSPS || t == codec.H265_NAL_SPS
+			switch t := codec.H265NaluTypeWithoutStartCode(nalu); {
+			case t >= codec.H265_NAL_SLICE_BLA_W_LP && t <= codec.H265_NAL_SLICE_CRA:
+				key = true
+			case t == codec.H265_NAL_VPS:
+				vps = true
+			case t == codec.H265_NAL_SPS:
+				sps = true
+			case t == codec.H265_NAL_PPS:
+				pps = true
+			}
 		} else {
-			t := codec.H264NaluTypeWithoutStartCode(nalu)
-			key = key || t == codec.H264_NAL_I_SLICE
-			hasSPS = hasSPS || t == codec.H264_NAL_SPS
+			switch codec.H264NaluTypeWithoutStartCode(nalu) {
+			case codec.H264_NAL_I_SLICE:
+				key = true
+			case codec.H264_NAL_SPS:
+				sps = true
+			case codec.H264_NAL_PPS:
+				pps = true
+			}
 		}
 	}
+	complete := sps && pps && (vps || !h265)
 	out := make([]byte, 0, len(frame)+len(wr.paramSets)+4*len(nalus))
-	if key && !hasSPS {
+	if key && !complete {
 		out = append(out, wr.paramSets...)
 	}
 	for _, nalu := range nalus {

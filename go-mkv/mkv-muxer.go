@@ -124,6 +124,13 @@ type muxTrack struct {
 
 	// endTs is where the latest frame ends, in milliseconds
 	endTs uint64
+	// video frames carry no duration of their own: the frame interval is
+	// the smallest gap between two presentation times, which holds under b
+	// frame reordering too
+	hasPts   bool
+	lastPts  uint64
+	maxPts   uint64
+	frameGap uint64
 
 	// G.711 has no frames, so writes are regrouped into 20 ms blocks: pcm
 	// holds the bytes not yet in a block, pcmBase the time of the run they
@@ -783,14 +790,26 @@ func (m *Muxer) writeBlock(b muxBlock) error {
 		m.cluster = append(m.cluster, b.data...)
 	}
 
-	end := b.pts + frameDurationMs(b.track, b.data)
-	b.track.endTs = max(b.track.endTs, end)
-	m.endTs = max(m.endTs, end)
+	t := b.track
+	if isVideo(t.cid) {
+		if t.hasPts {
+			gap := max(b.pts, t.lastPts) - min(b.pts, t.lastPts)
+			if gap > 0 && (t.frameGap == 0 || gap < t.frameGap) {
+				t.frameGap = gap
+			}
+		}
+		t.hasPts, t.lastPts = true, b.pts
+		t.maxPts = max(t.maxPts, b.pts)
+		t.endTs = t.maxPts + t.frameGap
+	} else {
+		t.endTs = max(t.endTs, b.pts+frameDurationMs(t, b.data))
+	}
+	m.endTs = max(m.endTs, t.endTs)
 	return nil
 }
 
-// frameDurationMs estimates how long a frame lasts so the file duration
-// covers the last frame; video frames count as zero.
+// frameDurationMs is how long an audio frame lasts, so the file duration
+// covers the last frame.
 func frameDurationMs(t *muxTrack, data []byte) uint64 {
 	if t.sampleRate == 0 {
 		return 0

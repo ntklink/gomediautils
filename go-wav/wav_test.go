@@ -210,3 +210,28 @@ func TestRejectsImpossibleSampleRate(t *testing.T) {
 		t.Fatal("accepted a 1.6 GHz sample rate")
 	}
 }
+
+// A data chunk of size 0 in a finished file is an empty file, even with a
+// chunk after it; only a header that was never filled in means "read to the
+// end".
+func TestZeroSizeDataChunk(t *testing.T) {
+	fmtChunk := "fmt \x10\x00\x00\x00\x07\x00\x01\x00\x40\x1f\x00\x00\x40\x1f\x00\x00\x01\x00\x08\x00"
+	body := "WAVE" + fmtChunk + "data\x00\x00\x00\x00" + "LIST\x04\x00\x00\x00abcd"
+	finished := "RIFF" + string(binary.LittleEndian.AppendUint32(nil, uint32(len(body)))) + body
+	rd, err := NewReader(bytes.NewReader([]byte(finished)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := io.ReadAll(rd); len(got) != 0 {
+		t.Fatalf("%d bytes of the next chunk read as audio", len(got))
+	}
+
+	stream := "RIFF\x00\x00\x00\x00WAVE" + fmtChunk + "data\x00\x00\x00\x00" + "\x01\x02\x03"
+	rd, err = NewReader(bytes.NewReader([]byte(stream)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := io.ReadAll(rd); len(got) != 3 {
+		t.Fatalf("stream with unfilled sizes: %d bytes, want 3", len(got))
+	}
+}

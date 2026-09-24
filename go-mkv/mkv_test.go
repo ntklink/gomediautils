@@ -547,3 +547,50 @@ func TestG711RegroupedInto20msBlocks(t *testing.T) {
 		t.Error("samples changed on the way through")
 	}
 }
+
+func TestHasParamSetsNeedsTheWholeSet(t *testing.T) {
+	idr := []byte{0, 0, 0, 1, 0x65, 0x88}
+	cat := func(parts ...[]byte) []byte {
+		var out []byte
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	irap := []byte{0, 0, 0, 1, 0x26, 0x01, 0xaf}
+	for name, tc := range map[string]struct {
+		au   []byte
+		h265 bool
+		want bool
+	}{
+		"h264 sps and pps": {cat(h264SPS, h264PPS, idr), false, true},
+		"h264 sps only":    {cat(h264SPS, idr), false, false},
+		"h264 none":        {idr, false, false},
+		"h265 all three":   {cat(h265VPS, h265SPS, h265PPS, irap), true, true},
+		"h265 no vps":      {cat(h265SPS, h265PPS, irap), true, false},
+		"h265 no pps":      {cat(h265VPS, h265SPS, irap), true, false},
+	} {
+		if got := hasParamSets(tc.au, tc.h265); got != tc.want {
+			t.Errorf("%s: %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// The duration of a video file runs to the end of its last frame, not to
+// where the last frame starts; with b frames the last frame shown is not the
+// last one written.
+func TestDurationCoversTheLastVideoFrame(t *testing.T) {
+	ws := &memWriteSeeker{}
+	m, _ := NewMuxer(ws)
+	v, _ := m.AddVideoTrack(codec.CODECID_VIDEO_H264)
+	for i, pts := range []uint64{0, 120, 40, 80, 240, 160, 200} {
+		if err := m.Write(v, h264Frame(i == 0), pts, pts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.WriteTrailer()
+	_, _, d := demuxAll(t, ws.buf)
+	if d.Duration() != 280 {
+		t.Fatalf("duration %d ms, want 280: seven frames of 40 ms", d.Duration())
+	}
+}
