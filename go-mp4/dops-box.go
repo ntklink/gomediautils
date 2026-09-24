@@ -150,3 +150,43 @@ func makeOpusSpecificBox(extraData []byte) []byte {
 	_, dopsbox := dops.Encode()
 	return dopsbox
 }
+
+// toOpusHead turns the box into the little endian OpusHead that ogg, webm and
+// the opus decoders expect; dOps carries the same fields big endian and
+// without the magic.
+func (dops *OpusSpecificBox) toOpusHead() []byte {
+	head := make([]byte, 19, 21+int(dops.OutputChannelCount))
+	copy(head, "OpusHead")
+	head[8] = 1
+	head[9] = dops.OutputChannelCount
+	binary.LittleEndian.PutUint16(head[10:], dops.PreSkip)
+	binary.LittleEndian.PutUint32(head[12:], dops.InputSampleRate)
+	binary.LittleEndian.PutUint16(head[16:], uint16(dops.OutputGain))
+	head[18] = dops.ChannelMappingFamily
+	if dops.ChanMapTable != nil {
+		head = append(head, dops.ChanMapTable.StreamCount, dops.ChanMapTable.CoupledCount)
+		head = append(head, dops.ChanMapTable.ChannelMapping...)
+	}
+	return head
+}
+
+func decodeDopsBox(demuxer *MovDemuxer, size uint32) (err error) {
+	track := demuxer.lastTrack()
+	if track == nil {
+		return errNoTrack
+	}
+	dops := NewdOpsBox()
+	if _, err = dops.Decode(demuxer.reader, size); err != nil {
+		return
+	}
+	if track.extra == nil {
+		track.extra = new(opusExtraData)
+	}
+	if dops.InputSampleRate != 0 && track.sampleRate == 0 {
+		track.sampleRate = dops.InputSampleRate
+	}
+	if track.chanelCount == 0 {
+		track.chanelCount = dops.OutputChannelCount
+	}
+	return track.extra.load(dops.toOpusHead())
+}

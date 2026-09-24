@@ -94,6 +94,25 @@ func (extra *aacExtraData) load(data []byte) error {
 	return nil
 }
 
+// opusExtraData keeps the OpusHead (RFC 7845 section 5.1) that the dOps box
+// of an opus sample entry is converted from and to.
+type opusExtraData struct {
+	head []byte
+}
+
+func (extra *opusExtraData) export() ([]byte, error) {
+	if len(extra.head) == 0 {
+		return nil, errors.New("mp4: opus track has no dOps box")
+	}
+	return extra.head, nil
+}
+
+func (extra *opusExtraData) load(data []byte) error {
+	extra.head = make([]byte, len(data))
+	copy(extra.head, data)
+	return nil
+}
+
 type movFragment struct {
 	offset   uint64
 	duration uint32

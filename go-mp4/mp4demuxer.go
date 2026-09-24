@@ -180,7 +180,8 @@ readLoop:
 			mov_tag([4]byte{'s', 't', 'b', 'l'}), mov_tag([4]byte{'a', 'v', 'c', '1'}),
 			mov_tag([4]byte{'h', 'v', 'c', '1'}), mov_tag([4]byte{'h', 'e', 'v', '1'}),
 			mov_tag([4]byte{'m', 'p', '4', 'a'}), mov_tag([4]byte{'u', 'l', 'a', 'w'}),
-			mov_tag([4]byte{'a', 'l', 'a', 'w'}), mov_tag([4]byte{'o', 'p', 'u', 's'}):
+			mov_tag([4]byte{'a', 'l', 'a', 'w'}), mov_tag([4]byte{'o', 'p', 'u', 's'}),
+			mov_tag([4]byte{'d', 'O', 'p', 's'}):
 			needTrack = true
 		}
 		if needTrack {
@@ -282,6 +283,10 @@ readLoop:
 			err = decodeAudioSampleEntry(demuxer)
 		case mov_tag([4]byte{'o', 'p', 'u', 's'}):
 			track.cid = MP4_CODEC_OPUS
+			track.extra = new(opusExtraData)
+			err = decodeAudioSampleEntry(demuxer)
+		case mov_tag([4]byte{'d', 'O', 'p', 's'}):
+			err = decodeDopsBox(demuxer, size32)
 		case mov_tag([4]byte{'a', 'v', 'c', 'C'}):
 			err = decodeAvccBox(demuxer, size32)
 		case mov_tag([4]byte{'h', 'v', 'c', 'C'}):
@@ -515,6 +520,23 @@ func (demuxer *MovDemuxer) ReadPacket() (*AVPacket, error) {
 			return avpkg, nil
 		}
 	}
+}
+
+// GetExtraData returns the codec configuration of a track in the form the
+// matching muxers take it: the avcC or hvcC record, the AAC
+// AudioSpecificConfig, or the OpusHead for opus. It must be called after
+// ReadHead.
+func (demuxer *MovDemuxer) GetExtraData(trackId uint32) ([]byte, error) {
+	for _, track := range demuxer.tracks {
+		if track.trackId != trackId {
+			continue
+		}
+		if track.extra == nil {
+			return nil, errors.New("mp4: track has no codec configuration")
+		}
+		return track.extra.export()
+	}
+	return nil, errors.New("not found track")
 }
 
 func (demuxer *MovDemuxer) GetSyncTable(trackId uint32) ([]SyncSample, error) {
