@@ -594,3 +594,21 @@ func TestDurationCoversTheLastVideoFrame(t *testing.T) {
 		t.Fatalf("duration %d ms, want 280: seven frames of 40 ms", d.Duration())
 	}
 }
+
+// The frame interval of a video track can only shrink as frames arrive; the
+// file duration follows the final one, not an early overestimate.
+func TestDurationUsesFinalFrameInterval(t *testing.T) {
+	ws := &memWriteSeeker{}
+	m, _ := NewMuxer(ws)
+	v, _ := m.AddVideoTrack(codec.CODECID_VIDEO_H264)
+	for i, pts := range []uint64{0, 100, 99} {
+		if err := m.Write(v, h264Frame(i == 0), pts, pts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.WriteTrailer()
+	_, _, d := demuxAll(t, ws.buf)
+	if d.Duration() != 101 {
+		t.Fatalf("duration %d ms, want 101", d.Duration())
+	}
+}
