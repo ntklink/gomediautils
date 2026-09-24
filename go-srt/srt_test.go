@@ -479,11 +479,13 @@ func TestTailResentBeforeDropped(t *testing.T) {
 
 // A packet the socket refuses (ENOBUFS, a network change) is a lost packet:
 // Write carries on, the sequence numbers stay consecutive, and a NAK for
-// the refused packet resends the right one.
+// the refused packet resends the right one. A refused retransmission
+// counts in SendErrors too.
 func TestFailedSendIsRecoveredAsLoss(t *testing.T) {
 	var mu sync.Mutex
 	var sent [][]byte
 	calls := 0
+	refuse := false
 	c := newConn(Config{PayloadSize: 1316, PeerIdleTimeout: time.Minute}, connParams{
 		socketID: 1, peerSocketID: 2, isn: 100,
 		rcvLatency: 120 * time.Millisecond, sndLatency: 120 * time.Millisecond,
@@ -491,7 +493,7 @@ func TestFailedSendIsRecoveredAsLoss(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		calls++
-		if calls == 2 {
+		if calls == 2 || refuse {
 			return syscall.ENOBUFS
 		}
 		sent = append(sent, append([]byte(nil), b...))
@@ -521,14 +523,33 @@ func TestFailedSendIsRecoveredAsLoss(t *testing.T) {
 		t.Fatalf("stats %+v", s)
 	}
 
-	// the receiver sees 102 after 100 and asks for 101
-	c.handlePacket(&packet{control: true, ctrlType: ctrlNAK, payload: encodeLossList([]uint32{101})})
+	// the receiver sees 102 after 100 and asks for 101; the socket refuses
+	// the first retransmission and takes the second
+	nak := &packet{control: true, ctrlType: ctrlNAK, payload: encodeLossList([]uint32{101})}
 	mu.Lock()
-	last := sent[len(sent)-1]
+	refuse = true
 	mu.Unlock()
-	p, err := parsePacket(last)
-	if err != nil || p.control || !p.retransmit || p.seq != 101 || p.payload[0] != 1 {
-		t.Fatalf("resent %+v", p)
+	c.handlePacket(nak)
+	mu.Lock()
+	refuse = false
+	mu.Unlock()
+	if s := c.Stats(); s.SendErrors != 2 || s.PacketsRetransmitted != 0 {
+		t.Fatalf("after a refused retransmission: %+v", s)
+	}
+	c.handlePacket(nak)
+
+	// the connection's own ticks may have sent control packets meanwhile,
+	// so look for the data packet rather than take the last one
+	var resent []*packet
+	mu.Lock()
+	for _, raw := range sent {
+		if p, err := parsePacket(raw); err == nil && !p.control && p.retransmit {
+			resent = append(resent, p)
+		}
+	}
+	mu.Unlock()
+	if len(resent) != 1 || resent[0].seq != 101 || resent[0].payload[0] != 1 {
+		t.Fatalf("resent %+v", resent)
 	}
 }
 
@@ -619,7 +640,8 @@ func TestMaxSendDelayHoldsWrite(t *testing.T) {
 	}
 }
 
-// Closing the connection ends a Write waiting for room.
+// Close ends a Write waiting for room at once, and takes no more writes
+// while it lets the last packets go out.
 func TestCloseEndsWaitingWrite(t *testing.T) {
 	c, _ := testConnWith(t, Config{PeerIdleTimeout: time.Minute, SendBufferSize: 1316}, nil)
 	done := make(chan error, 1)
@@ -628,15 +650,29 @@ func TestCloseEndsWaitingWrite(t *testing.T) {
 		done <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
-	go c.Close()
+	closed := make(chan struct{})
+	go func() {
+		c.Close()
+		close(closed)
+	}()
 	select {
 	case err := <-done:
 		if !errors.Is(err, net.ErrClosed) {
 			t.Fatalf("write ended with %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(100 * time.Millisecond):
 		t.Fatal("write still waiting after Close")
 	}
+	// the unacknowledged packet keeps Close lingering for the latency
+	select {
+	case <-closed:
+		t.Fatal("Close did not linger")
+	default:
+	}
+	if n, err := c.Write(make([]byte, 1316)); n != 0 || !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("write while Close lingers: %d %v", n, err)
+	}
+	<-closed
 }
 
 // Done and Err tell when and why a connection closed, and Write returns
@@ -650,8 +686,10 @@ func TestCloseReasons(t *testing.T) {
 	if err := caller.Err(); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("after Close: %v", err)
 	}
-	if _, err := caller.Write([]byte("x")); !errors.Is(err, net.ErrClosed) {
-		t.Fatalf("write after Close: %v", err)
+	for _, b := range [][]byte{[]byte("x"), nil} {
+		if _, err := caller.Write(b); !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("write of %d bytes after Close: %v", len(b), err)
+		}
 	}
 	select {
 	case <-accepted.Done():
@@ -661,8 +699,10 @@ func TestCloseReasons(t *testing.T) {
 	if err := accepted.Err(); err != ErrPeerShutdown {
 		t.Fatalf("peer shutdown: %v", err)
 	}
-	if _, err := accepted.Write([]byte("x")); err != ErrPeerShutdown {
-		t.Fatalf("write after peer shutdown: %v", err)
+	for _, b := range [][]byte{[]byte("x"), nil} {
+		if _, err := accepted.Write(b); err != ErrPeerShutdown {
+			t.Fatalf("write of %d bytes after peer shutdown: %v", len(b), err)
+		}
 	}
 	if _, err := accepted.Read(make([]byte, 1500)); err != io.EOF {
 		t.Fatalf("read after peer shutdown: %v", err)
@@ -683,11 +723,25 @@ func TestMaxSendDelayLimits(t *testing.T) {
 	if _, err := (Config{MaxSendDelay: 60 * time.Millisecond}).withDefaults(); err != nil {
 		t.Fatal(err)
 	}
-	// packets are kept 170 ms with the default 120 ms latency
-	for _, d := range []time.Duration{-time.Millisecond, 170 * time.Millisecond} {
-		if _, err := (Config{MaxSendDelay: d}).withDefaults(); err == nil {
-			t.Errorf("MaxSendDelay %v accepted", d)
+	for _, cfg := range []Config{
+		{MaxSendDelay: -time.Millisecond},
+		// packets are kept 170 ms with the default 120 ms latency
+		{MaxSendDelay: 170 * time.Millisecond},
+		// the handshake carries 120 ms, not 120.9
+		{Latency: 120900 * time.Microsecond, MaxSendDelay: 170500 * time.Microsecond},
+	} {
+		if _, err := cfg.withDefaults(); err == nil {
+			t.Errorf("%+v accepted", cfg)
 		}
+	}
+}
+
+func TestSendBufferSizeLimits(t *testing.T) {
+	if _, err := (Config{SendBufferSize: 1316}).withDefaults(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Config{SendBufferSize: 1315}).withDefaults(); err == nil {
+		t.Error("a send buffer smaller than one packet accepted")
 	}
 }
 
