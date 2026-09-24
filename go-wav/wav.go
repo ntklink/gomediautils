@@ -267,8 +267,11 @@ func NewReader(r io.Reader, options ...ReaderOption) (*Reader, error) {
 			if !haveFmt {
 				return nil, errors.New("wav: data chunk before the fmt chunk")
 			}
-			// 0 and 0xFFFFFFFF are what streaming writers leave behind
-			rd.sized = size != 0 && size != 0xFFFFFFFF
+			// 0xFFFFFFFF is what streaming writers leave behind; some write
+			// 0 instead, but so does a finished file that holds no audio,
+			// which is told apart by the RIFF size its writer filled in
+			riffSize := binary.LittleEndian.Uint32(riff[4:])
+			rd.sized = size != 0xFFFFFFFF && (size != 0 || (riffSize != 0 && riffSize != 0xFFFFFFFF))
 			rd.remain = uint64(size)
 			return rd, nil
 		default:

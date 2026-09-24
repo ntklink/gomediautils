@@ -888,17 +888,32 @@ func (t *demuxTrack) output(frame []byte, key *bool, simple bool) ([]byte, error
 	return frame, nil
 }
 
+// hasParamSets reports whether an access unit carries every parameter set
+// a decoder needs to start there: SPS and PPS, and a VPS for H.265. A key
+// frame with only some of them still gets the ones from CodecPrivate.
 func hasParamSets(annexb []byte, h265 bool) bool {
-	found := false
+	var vps, sps, pps bool
 	codec.SplitFrame(annexb, func(nalu []byte) bool {
 		if h265 {
-			found = codec.H265NaluTypeWithoutStartCode(nalu) == codec.H265_NAL_SPS
+			switch codec.H265NaluTypeWithoutStartCode(nalu) {
+			case codec.H265_NAL_VPS:
+				vps = true
+			case codec.H265_NAL_SPS:
+				sps = true
+			case codec.H265_NAL_PPS:
+				pps = true
+			}
 		} else {
-			found = codec.H264NaluTypeWithoutStartCode(nalu) == codec.H264_NAL_SPS
+			switch codec.H264NaluTypeWithoutStartCode(nalu) {
+			case codec.H264_NAL_SPS:
+				sps = true
+			case codec.H264_NAL_PPS:
+				pps = true
+			}
 		}
-		return !found
+		return true
 	})
-	return found
+	return sps && pps && (vps || !h265)
 }
 
 // frameDuration is how long a frame lasts in nanoseconds, used to space out

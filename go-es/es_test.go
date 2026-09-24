@@ -265,3 +265,144 @@ func TestNewReaderProbes(t *testing.T) {
 		t.Fatalf("text: %v", err)
 	}
 }
+
+// A key frame that carries an SPS but not its PPS still needs the parameter
+// sets from the extra data; only a complete set makes it self-contained.
+func TestWriterCompletesPartialParameterSets(t *testing.T) {
+	avcC, _ := codec.CreateH264AVCCExtradata([][]byte{h264SPS}, [][]byte{h264PPS})
+	var out bytes.Buffer
+	w, _ := NewWriter(&out, codec.CODECID_VIDEO_H264, avcC)
+	frame := append(append([]byte{}, h264SPS...), 0, 0, 0, 1, 0x65, 0x88, 0x84)
+	if err := w.WriteFrame(frame); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out.Bytes(), h264PPS) {
+		t.Fatal("key frame without a PPS written without one")
+	}
+}
+
+// bitWriter builds rbsp payloads for hand made parameter sets and slices.
+type bitWriter struct{ bits []byte }
+
+func (w *bitWriter) u(v uint64, n int) {
+	for i := n - 1; i >= 0; i-- {
+		w.bits = append(w.bits, byte(v>>i)&1)
+	}
+}
+
+func (w *bitWriter) ue(v uint64) {
+	n := 0
+	for (v+1)>>(n+1) != 0 {
+		n++
+	}
+	w.u(0, n)
+	w.u(v+1, n+1)
+}
+
+func (w *bitWriter) se(v int64) {
+	if v > 0 {
+		w.ue(uint64(2*v - 1))
+	} else {
+		w.ue(uint64(-2 * v))
+	}
+}
+
+// nal closes the rbsp and returns it as an Annex-B nal unit, with
+// emulation prevention bytes where the payload needs them.
+func (w *bitWriter) nal(header byte) []byte {
+	w.u(1, 1)
+	for len(w.bits)%8 != 0 {
+		w.bits = append(w.bits, 0)
+	}
+	out := []byte{0, 0, 0, 1, header}
+	zeros := 0
+	for i := 0; i < len(w.bits); i += 8 {
+		var b byte
+		for _, bit := range w.bits[i : i+8] {
+			b = b<<1 | bit
+		}
+		if zeros >= 2 && b <= 3 {
+			out = append(out, 3)
+			zeros = 0
+		}
+		if b == 0 {
+			zeros++
+		} else {
+			zeros = 0
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// H.264 picture order count type 1 derives the order from frame_num and the
+// offsets of the SPS, and still lets b frames be shown out of decode order.
+func TestH264PocType1(t *testing.T) {
+	var sps bitWriter
+	sps.u(66, 8)
+	sps.u(0, 8)
+	sps.u(30, 8)
+	sps.ue(0)   // seq_parameter_set_id
+	sps.ue(0)   // log2_max_frame_num_minus4
+	sps.ue(1)   // pic_order_cnt_type
+	sps.u(0, 1) // delta_pic_order_always_zero_flag
+	sps.se(-4)  // offset_for_non_ref_pic
+	sps.se(0)   // offset_for_top_to_bottom_field
+	sps.ue(1)   // num_ref_frames_in_pic_order_cnt_cycle
+	sps.se(6)   // offset_for_ref_frame[0]: three frames per reference
+	sps.ue(2)   // max_num_ref_frames
+	sps.u(0, 1)
+	sps.ue(3) // pic_width_in_mbs_minus1
+	sps.ue(2) // pic_height_in_map_units_minus1
+	sps.u(1, 1)
+	sps.u(1, 1)
+	sps.u(0, 1)
+	sps.u(0, 1)
+	var pps bitWriter
+	pps.ue(0)
+	pps.ue(0)
+	pps.u(0, 2)
+	pps.ue(0)
+	stream := append(sps.nal(0x67), pps.nal(0x68)...)
+
+	type pic struct {
+		header   byte
+		typ      uint64
+		frameNum uint64
+		delta    int64
+	}
+	pics := []pic{
+		{0x65, 7, 0, 0}, // IDR, poc 0
+		{0x41, 5, 1, 0}, // P, poc 6
+		{0x01, 6, 2, 0}, // B, poc 2
+		{0x01, 6, 2, 2}, // B, poc 4
+		{0x41, 5, 2, 0}, // P, poc 12
+		{0x01, 6, 3, 0}, // B, poc 8
+		{0x01, 6, 3, 2}, // B, poc 10
+	}
+	for _, p := range pics {
+		var s bitWriter
+		s.ue(0) // first_mb_in_slice
+		s.ue(p.typ)
+		s.ue(0) // pic_parameter_set_id
+		s.u(p.frameNum, 4)
+		if p.header == 0x65 {
+			s.ue(0) // idr_pic_id
+		}
+		s.se(p.delta)
+		s.u(0x5a, 8) // stand-in for the rest of the slice
+		stream = append(stream, s.nal(p.header)...)
+	}
+
+	frames := readAll(t, NewH264Reader(bytes.NewReader(stream), WithFrameRate(25)))
+	if len(frames) != len(pics) {
+		t.Fatalf("%d frames, want %d", len(frames), len(pics))
+	}
+	// presentation order I B B P B B P, one frame of reordering delay
+	wantPts := []uint64{40, 160, 80, 120, 280, 200, 240}
+	for i, f := range frames {
+		if f.Pts != wantPts[i] || f.Dts != uint64(i*40) {
+			t.Errorf("frame %d: pts %d dts %d, want %d %d", i, f.Pts, f.Dts, wantPts[i], i*40)
+		}
+	}
+}
