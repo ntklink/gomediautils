@@ -24,6 +24,7 @@ func ParseStreamID(sid string) StreamIDInfo {
 	if !ok {
 		info.Resource = sid
 		info.Mode = "request"
+		info.Type = "stream"
 		return info
 	}
 	for _, kv := range strings.Split(body, ",") {
@@ -38,6 +39,9 @@ func ParseStreamID(sid string) StreamIDInfo {
 	info.Host = info.Params["h"]
 	if info.Mode == "" {
 		info.Mode = "request"
+	}
+	if info.Type == "" {
+		info.Type = "stream"
 	}
 	return info
 }

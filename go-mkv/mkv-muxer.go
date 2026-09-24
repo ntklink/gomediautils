@@ -233,7 +233,6 @@ type Muxer struct {
 	clusterTs    uint64
 	clusterStart uint64
 	cues         []cuePoint
-	endTs        uint64
 }
 
 // NewMuxer creates a muxer writing to w. Nothing is written until the first
@@ -804,7 +803,6 @@ func (m *Muxer) writeBlock(b muxBlock) error {
 	} else {
 		t.endTs = max(t.endTs, b.pts+frameDurationMs(t, b.data))
 	}
-	m.endTs = max(m.endTs, t.endTs)
 	return nil
 }
 
@@ -891,7 +889,13 @@ func (m *Muxer) WriteTrailer() error {
 
 	segmentSize := appendSize(nil, uint64(end-m.segmentDataAt), 8)
 	duration := make([]byte, 8)
-	binary.BigEndian.PutUint64(duration, math.Float64bits(float64(m.endTs)))
+	// a video track's end is only final once its smallest frame gap is
+	// known, so the file end is taken from the tracks' final values
+	var endTs uint64
+	for _, t := range m.tracks {
+		endTs = max(endTs, t.endTs)
+	}
+	binary.BigEndian.PutUint64(duration, math.Float64bits(float64(endTs)))
 
 	for _, patch := range []struct {
 		at   int64
