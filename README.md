@@ -1,6 +1,6 @@
 # GoMediaUtils
 
-A Go library for muxing and demuxing MPEG-TS, MPEG-PS, FLV, MP4, Matroska/WebM, and RTMP media streams.
+A Go library for muxing and demuxing MPEG-TS, MPEG-PS, FLV, MP4, Matroska/WebM, and RTMP, RTSP and SRT media streams.
 
 ## Installation
 
@@ -51,4 +51,11 @@ See the [RTMP usage guide](go-rtmp/README.md) for more details.
 - Basic and Digest authentication
 - RTP support ([RFC 3550](https://datatracker.ietf.org/doc/html/rfc3550))
 - G.711, AAC, H.264, and H.265 support
-  
+
+## SRT
+
+- Caller (`srt.Dial`) and listener (`srt.Listen`, `Accept`) in live mode, interoperable with libsrt (ffmpeg, OBS, srt-live-transmit)
+- HSv5 handshake with stream id, parsed in the `#!::r=...,m=publish` access control syntax, and per stream authorization and rejection
+- Loss recovery: ACK/ACKACK round trip timing, immediate and periodic NAK, retransmission, too-late packet drop within the negotiated latency
+- AES-128/192/256 encryption from a passphrase (PBKDF2, RFC 3394 key wrap, AES-CTR)
+- `Conn` is a `net.Conn`; its reads form a byte stream the MPEG-TS demuxer consumes directly

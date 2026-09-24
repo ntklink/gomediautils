@@ -110,3 +110,25 @@ func (tools Tools) runErr(bin string, args ...string) (stdout []byte, stderr str
 func FFmpegArgs(args ...string) []string {
 	return append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y"}, args...)
 }
+
+// RunFFmpeg runs ffmpeg and hands back its output and error, for tests
+// that expect it to fail and want to see why.
+func (tools Tools) RunFFmpeg(args ...string) (stdout []byte, stderr string, err error) {
+	return tools.runErr(tools.FFmpeg, args...)
+}
+
+// RequireProtocol skips the test when ffmpeg was built without a protocol,
+// such as srt, which needs libsrt.
+func (tools Tools) RequireProtocol(t *testing.T, name string) {
+	t.Helper()
+	out, _, err := tools.runErr(tools.FFmpeg, "-hide_banner", "-protocols")
+	if err != nil {
+		t.Skipf("cannot list ffmpeg protocols: %v", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == name {
+			return
+		}
+	}
+	t.Skipf("ffmpeg has no %s protocol", name)
+}
