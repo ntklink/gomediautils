@@ -477,37 +477,43 @@ func TestTailResentBeforeDropped(t *testing.T) {
 	}
 }
 
-// A live stream pauses between frames. With a short round trip the ACK
-// for the last packets of a frame comes an ACK interval later than the
-// round trip alone; that is no loss, and nothing is sent again.
+// A live stream pauses between frames. The ACK for the last packets of a
+// frame comes up to an ACK interval later than the round trip alone; that
+// is no loss, and nothing is sent again before it is due. A tail that
+// really went missing is still sent again. The checks run resendTail at
+// chosen times instead of sleeping, so a slow machine cannot tip them.
 func TestTailNotResentWhileACKDue(t *testing.T) {
 	c, sent := testConn(t, nil)
-	// the receiver measured a 10 ms round trip
+	// the receiver measured a 30 ms round trip, with no variation: the
+	// wait is 30 ms without the ACK interval allowance and 60 ms with it,
+	// below the cap of half the 170 ms hold limit
 	ack := binary.BigEndian.AppendUint32(nil, 100)
-	ack = binary.BigEndian.AppendUint32(ack, 10000)
+	ack = binary.BigEndian.AppendUint32(ack, 30000)
 	c.handlePacket(&packet{control: true, ctrlType: ctrlACK, typeInfo: 1, payload: append(ack, make([]byte, 20)...)})
 
 	c.Write(make([]byte, 3*1316))
-	// the round trip and one ACK interval, with some slack
-	time.Sleep(10*time.Millisecond + ackInterval + 10*time.Millisecond)
-	ackUpTo(c, 103)
-	for _, raw := range sent() {
-		if p, err := parsePacket(raw); err == nil && !p.control && p.retransmit {
-			t.Fatalf("packet %d sent again before its ACK was due", p.seq)
+	c.mu.Lock()
+	written := c.lastData
+	c.mu.Unlock()
+	resent := func(at time.Duration) int {
+		c.mu.Lock()
+		c.resendTail(written.Add(at))
+		c.mu.Unlock()
+		n := 0
+		for _, raw := range sent() {
+			if p, err := parsePacket(raw); err == nil && !p.control && p.retransmit {
+				n++
+			}
 		}
+		return n
 	}
-
-	// a tail that really went missing is still sent again in time
-	c.Write(make([]byte, 1316))
-	time.Sleep(c.sendHoldLimit() / 2)
-	resent := false
-	for _, raw := range sent() {
-		if p, err := parsePacket(raw); err == nil && !p.control && p.retransmit && p.seq == 103 {
-			resent = true
-		}
+	// past the round trip, but the ACK may still be on its way
+	if n := resent(45 * time.Millisecond); n != 0 {
+		t.Fatalf("%d packets sent again before their ACK was due", n)
 	}
-	if !resent {
-		t.Fatal("lost tail not sent again")
+	// past the ACK interval allowance too: the tail went missing
+	if n := resent(70 * time.Millisecond); n != 3 {
+		t.Fatalf("%d of the 3 lost tail packets sent again", n)
 	}
 }
 
