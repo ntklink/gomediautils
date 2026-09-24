@@ -224,6 +224,8 @@ var elementaryFormat = map[string]string{
 	"aac":  "adts",
 	"mp3":  "mp3",
 	"opus": "opus",
+	"alaw": "alaw",
+	"ulaw": "mulaw",
 }
 
 // ExtractStream copies one stream out of a container into a bare elementary

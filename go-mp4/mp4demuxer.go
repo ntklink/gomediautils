@@ -180,7 +180,9 @@ readLoop:
 			mov_tag([4]byte{'s', 't', 'b', 'l'}), mov_tag([4]byte{'a', 'v', 'c', '1'}),
 			mov_tag([4]byte{'h', 'v', 'c', '1'}), mov_tag([4]byte{'h', 'e', 'v', '1'}),
 			mov_tag([4]byte{'m', 'p', '4', 'a'}), mov_tag([4]byte{'u', 'l', 'a', 'w'}),
-			mov_tag([4]byte{'a', 'l', 'a', 'w'}), mov_tag([4]byte{'o', 'p', 'u', 's'}):
+			mov_tag([4]byte{'a', 'l', 'a', 'w'}), mov_tag([4]byte{'O', 'p', 'u', 's'}),
+			mov_tag([4]byte{'o', 'p', 'u', 's'}),
+			mov_tag([4]byte{'d', 'O', 'p', 's'}):
 			needTrack = true
 		}
 		if needTrack {
@@ -280,8 +282,14 @@ readLoop:
 		case mov_tag([4]byte{'a', 'l', 'a', 'w'}):
 			track.cid = MP4_CODEC_G711A
 			err = decodeAudioSampleEntry(demuxer)
-		case mov_tag([4]byte{'o', 'p', 'u', 's'}):
+		case mov_tag([4]byte{'O', 'p', 'u', 's'}), mov_tag([4]byte{'o', 'p', 'u', 's'}):
+			// Opus is the registered name; older files of this package wrote
+			// it in lower case
 			track.cid = MP4_CODEC_OPUS
+			track.extra = new(opusExtraData)
+			err = decodeAudioSampleEntry(demuxer)
+		case mov_tag([4]byte{'d', 'O', 'p', 's'}):
+			err = decodeDopsBox(demuxer, size32)
 		case mov_tag([4]byte{'a', 'v', 'c', 'C'}):
 			err = decodeAvccBox(demuxer, size32)
 		case mov_tag([4]byte{'h', 'v', 'c', 'C'}):
@@ -517,6 +525,23 @@ func (demuxer *MovDemuxer) ReadPacket() (*AVPacket, error) {
 	}
 }
 
+// GetExtraData returns the codec configuration of a track in the form the
+// matching muxers take it: the avcC or hvcC record, the AAC
+// AudioSpecificConfig, or the OpusHead for opus. It must be called after
+// ReadHead.
+func (demuxer *MovDemuxer) GetExtraData(trackId uint32) ([]byte, error) {
+	for _, track := range demuxer.tracks {
+		if track.trackId != trackId {
+			continue
+		}
+		if track.extra == nil {
+			return nil, errors.New("mp4: track has no codec configuration")
+		}
+		return track.extra.export()
+	}
+	return nil, errors.New("not found track")
+}
+
 func (demuxer *MovDemuxer) GetSyncTable(trackId uint32) ([]SyncSample, error) {
 	var track *mp4track = nil
 	for i := 0; i < len(demuxer.tracks); i++ {
@@ -582,6 +607,11 @@ func (demuxer *MovDemuxer) SeekTime(dts uint64) error {
 }
 
 func (demuxer *MovDemuxer) buildSampleList() error {
+	cur, remain, err := demuxer.remainingFileSize()
+	if err != nil {
+		return err
+	}
+	fileSize := uint64(cur + remain)
 	for _, track := range demuxer.tracks {
 		stbl := track.stbltable
 		if stbl == nil || stbl.stsz == nil || stbl.stsz.sampleCount == 0 {
@@ -597,6 +627,12 @@ func (demuxer *MovDemuxer) buildSampleList() error {
 		}
 		if stbl.stsz.sampleSize == 0 && len(stbl.stsz.entrySizelist) < int(stbl.stsz.sampleCount) {
 			return fmt.Errorf("mp4: track %d stsz entry list is shorter than sample count", track.trackId)
+		}
+		// a constant sample size leaves sample_count bounded by nothing read
+		// from the file; samples that cannot fit in it are corrupt and would
+		// otherwise cost an allocation of up to 2^32 entries
+		if stbl.stsz.sampleSize != 0 && uint64(stbl.stsz.sampleCount) > fileSize/uint64(stbl.stsz.sampleSize) {
+			return fmt.Errorf("mp4: track %d stsz describes more samples than the file holds", track.trackId)
 		}
 		chunkCount := len(stbl.stco.chunkOffsetlist)
 		chunks := make([]movchunk, chunkCount)

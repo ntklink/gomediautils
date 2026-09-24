@@ -211,3 +211,13 @@ func TestOpusSpecificBoxRoundTrip(t *testing.T) {
 		t.Errorf("round trip changed the mapping table: %+v", out.ChanMapTable)
 	}
 }
+
+// A constant size stsz whose sample_count cannot fit in the file used to make
+// buildSampleList allocate one entry per declared sample, gigabytes for a 256
+// byte input. Found by FuzzMovDemuxerNoCallback.
+func TestStszSampleCountBoundedByFileSize(t *testing.T) {
+	data := []byte("0000mvhd\x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000trak0000mdhd0000000000000000000000000000stbl0000stts0000\x00\x00\x00\x0200000000000000000000stsc0000\x00\x00\x00\x010000000000000000stsz000000000\x00\x00\b\x00\x00\x00\x14stco\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x000")
+	if _, err := CreateMp4Demuxer(bytes.NewReader(data)).ReadHead(); err == nil {
+		t.Fatal("ReadHead accepted a stsz declaring more samples than the file holds")
+	}
+}

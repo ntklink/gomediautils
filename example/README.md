@@ -89,6 +89,12 @@ the source file would be measuring that instead.
 | `hls_fmp4_h265` | the same for hevc, where the init segment carries an hvcC |
 | `play_mp4_with_hls` | mp4 cut into ts segments on demand, every one starting on a keyframe |
 | `edit_mp4_time` | patching mvhd/tkhd/mdhd dates in place without moving a byte |
+| `convert_mp4_to_mkv` | mp4 demuxer + matroska muxer, h264/h265 with aac/opus/mp3/g711, b frames |
+| `convert_mkv_to_mp4` | matroska demuxer + mp4 muxer: decode times for b frames, live files with unknown sizes, mkvmerge lacing, zlib and block groups |
+| `convert_flv_to_wav` | g711 out of an flv (a camera's rtmp stream) into a wav file |
+| `convert_wav_to_mkv` | a g711 wav read by go-wav as an es.Reader, muxed into matroska |
+| `convert_mkv_to_opus` | opus out of webm/matroska into an ogg opus file: pre-skip, paging and end trimming decode to the same samples |
+| `remux_webm` | vp8 and opus through the demuxer and the webm muxer, as a file with cues and as a live stream |
 
 ### demuxers
 
@@ -107,6 +113,7 @@ the source file would be measuring that instead.
 
 | example | what the test drives |
 | --- | --- |
+| `mux_mkv` | bare h264/h265/aac/mp3/g711 streams read by go-es into matroska: b frame timestamps from the picture order count, multi slice pictures |
 | `mux_ts` | ts muxer fed a bare Annex-B stream |
 | `mux_ts_aac` | audio only ts, where the pcr has to ride on the audio pid |
 | `mux_ts_mp3` | mp3 in ts, constant and variable bitrate |
