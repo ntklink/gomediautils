@@ -707,6 +707,11 @@ func TestCloseReasons(t *testing.T) {
 	if _, err := accepted.Read(make([]byte, 1500)); err != io.EOF {
 		t.Fatalf("read after peer shutdown: %v", err)
 	}
+	// closing it as well, the application is done with it
+	accepted.Close()
+	if _, err := accepted.Read(make([]byte, 1500)); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("read after Close: %v", err)
+	}
 
 	idle, _ := testConnWith(t, Config{PeerIdleTimeout: 50 * time.Millisecond}, nil)
 	select {
@@ -897,5 +902,73 @@ func TestMaxSendDelayOnSlowLink(t *testing.T) {
 	}
 	if got, s := slowLinkRun(t, 0); got == 1000 {
 		t.Fatalf("without MaxSendDelay nothing was lost, the link is not narrow enough: sender %+v", s)
+	}
+}
+
+// Close ends every Read waiting at once, even while it lingers for the last
+// packets written, and from then on drops what the peer sends.
+func TestCloseEndsWaitingReads(t *testing.T) {
+	c, _ := testConn(t, nil)
+	// an unacknowledged packet keeps Close lingering for the latency
+	c.Write(make([]byte, 1316))
+	done := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := c.Read(make([]byte, 1500))
+			done <- err
+		}()
+	}
+	time.Sleep(20 * time.Millisecond)
+	closed := make(chan struct{})
+	go func() {
+		c.Close()
+		close(closed)
+	}()
+	for range 2 {
+		select {
+		case err := <-done:
+			if !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("read ended with %v", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("read still waiting after Close")
+		}
+	}
+	select {
+	case <-closed:
+		t.Fatal("Close did not linger")
+	default:
+	}
+	c.handlePacket(&packet{seq: 100, position: positionSolo, msgNo: 1, payload: []byte("late")})
+	c.mu.Lock()
+	held := len(c.rcvBuf) + len(c.ready)
+	c.mu.Unlock()
+	if held != 0 {
+		t.Fatal("data taken in while Close lingers")
+	}
+	<-closed
+}
+
+// What arrived and was not read is dropped by Close: a Read after it fails
+// rather than hand over data the application closed the connection on.
+func TestCloseDropsUnread(t *testing.T) {
+	caller, accepted := pair(t, ListenConfig{}, Config{}, 0)
+	caller.Write([]byte("unread"))
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		accepted.mu.Lock()
+		n := len(accepted.ready)
+		accepted.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("nothing arrived")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	accepted.Close()
+	if n, err := accepted.Read(make([]byte, 1500)); n != 0 || !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("read after Close: %d %v", n, err)
 	}
 }
