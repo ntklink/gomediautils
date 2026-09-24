@@ -127,10 +127,12 @@ the source file would be measuring that instead.
 | example | what the test drives |
 | --- | --- |
 | `rtmp_server` | ffmpeg publishes and plays over rtmp |
+| `srt_server` | ffmpeg (libsrt) publishes mpeg-ts over srt and GoMediaUtils records it, encrypted and through a lossy link; players are rejected |
 | `rtsp_server` | ffmpeg announces, pushes and plays over rtsp, with digest auth |
 | `rtsp_play_server` | ffmpeg plays mpeg-ts over rtp from GoMediaUtils, over tcp and udp |
 | `http_flv_server` | http-flv, remuxed per frame, plus a path traversal check |
 | `rtmp_publish_client` | GoMediaUtils publishes into a third party server |
+| `srt_push` | GoMediaUtils publishes an mp4 as mpeg-ts over srt to ffmpeg listening with libsrt, encrypted and through a lossy link |
 | `rtmp_play_client` | GoMediaUtils plays from a third party server |
 | `mp4_to_rtmp_server` | GoMediaUtils publishes an mp4, interleaved and with b frame timing |
 | `rtsp_play_client_rtp_over_rtsp` | GoMediaUtils plays rtsp with interleaved rtp |
