@@ -14,37 +14,6 @@ func makePlay(transactionId int, streamName string, start float64, duration floa
 		bytes()
 }
 
-func makeLivePlay(transactionId int, streamName string) ([]byte, error) {
-	return makePlay(transactionId, streamName, -1, -1, true)
-}
-
-func makeDeleteStream(streamId int) ([]byte, error) {
-	var b amf0Buf
-	return b.item(makeStringItem("deleteStream")).
-		item(makeNumberItem(0)).
-		null().
-		item(makeNumberItem(float64(streamId))).
-		bytes()
-}
-
-func makeReceiveAudio(flag bool) ([]byte, error) {
-	var b amf0Buf
-	return b.item(makeStringItem("receiveAudio")).
-		item(makeNumberItem(0)).
-		null().
-		item(makeBoolItem(flag)).
-		bytes()
-}
-
-func makeReceiveVideo(flag bool) ([]byte, error) {
-	var b amf0Buf
-	return b.item(makeStringItem("receiveVideo")).
-		item(makeNumberItem(0)).
-		null().
-		item(makeBoolItem(flag)).
-		bytes()
-}
-
 func makePublish(pubName, pubType string) ([]byte, error) {
 	var b amf0Buf
 	return b.item(makeStringItem("publish")).
@@ -52,25 +21,6 @@ func makePublish(pubName, pubType string) ([]byte, error) {
 		null().
 		item(makeStringItem(pubName)).
 		item(makeStringItem(pubType)).
-		bytes()
-}
-
-func makeSeek(milliSeconds float64) ([]byte, error) {
-	var b amf0Buf
-	return b.item(makeStringItem("seek")).
-		item(makeNumberItem(0)).
-		null().
-		item(makeNumberItem(milliSeconds)).
-		bytes()
-}
-
-func makePause(pause bool, milliSeconds float64) ([]byte, error) {
-	var b amf0Buf
-	return b.item(makeStringItem("pause")).
-		item(makeNumberItem(0)).
-		null().
-		item(makeBoolItem(pause)).
-		item(makeNumberItem(milliSeconds)).
 		bytes()
 }
 
@@ -86,15 +36,6 @@ func makeReleaseStream(streamName string) ([]byte, error) {
 func makeFcPublish(streamName string) ([]byte, error) {
 	var b amf0Buf
 	return b.item(makeStringItem("FCPublish")).
-		item(makeNumberItem(0)).
-		null().
-		item(makeStringItem(streamName)).
-		bytes()
-}
-
-func makeFcUnPublish(streamName string) ([]byte, error) {
-	var b amf0Buf
-	return b.item(makeStringItem("FCUnpublish")).
 		item(makeNumberItem(0)).
 		null().
 		item(makeStringItem(streamName)).

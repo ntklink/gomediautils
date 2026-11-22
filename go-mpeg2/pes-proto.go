@@ -75,57 +75,57 @@ func NewPesPacket() *PesPacket {
 }
 
 func (pkg *PesPacket) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("stream_id:%d\n", pkg.Stream_id))
-	file.WriteString(fmt.Sprintf("PES_packet_length:%d\n", pkg.PES_packet_length))
-	file.WriteString(fmt.Sprintf("PES_scrambling_control:%d\n", pkg.PES_scrambling_control))
-	file.WriteString(fmt.Sprintf("PES_priority:%d\n", pkg.PES_priority))
-	file.WriteString(fmt.Sprintf("data_alignment_indicator:%d\n", pkg.Data_alignment_indicator))
-	file.WriteString(fmt.Sprintf("copyright:%d\n", pkg.Copyright))
-	file.WriteString(fmt.Sprintf("original_or_copy:%d\n", pkg.Original_or_copy))
-	file.WriteString(fmt.Sprintf("PTS_DTS_flags:%d\n", pkg.PTS_DTS_flags))
-	file.WriteString(fmt.Sprintf("ESCR_flag:%d\n", pkg.ESCR_flag))
-	file.WriteString(fmt.Sprintf("ES_rate_flag:%d\n", pkg.ES_rate_flag))
-	file.WriteString(fmt.Sprintf("DSM_trick_mode_flag:%d\n", pkg.DSM_trick_mode_flag))
-	file.WriteString(fmt.Sprintf("additional_copy_info_flag:%d\n", pkg.Additional_copy_info_flag))
-	file.WriteString(fmt.Sprintf("PES_CRC_flag:%d\n", pkg.PES_CRC_flag))
-	file.WriteString(fmt.Sprintf("PES_extension_flag:%d\n", pkg.PES_extension_flag))
-	file.WriteString(fmt.Sprintf("PES_header_data_length:%d\n", pkg.PES_header_data_length))
+	fmt.Fprintf(file, "stream_id:%d\n", pkg.Stream_id)
+	fmt.Fprintf(file, "PES_packet_length:%d\n", pkg.PES_packet_length)
+	fmt.Fprintf(file, "PES_scrambling_control:%d\n", pkg.PES_scrambling_control)
+	fmt.Fprintf(file, "PES_priority:%d\n", pkg.PES_priority)
+	fmt.Fprintf(file, "data_alignment_indicator:%d\n", pkg.Data_alignment_indicator)
+	fmt.Fprintf(file, "copyright:%d\n", pkg.Copyright)
+	fmt.Fprintf(file, "original_or_copy:%d\n", pkg.Original_or_copy)
+	fmt.Fprintf(file, "PTS_DTS_flags:%d\n", pkg.PTS_DTS_flags)
+	fmt.Fprintf(file, "ESCR_flag:%d\n", pkg.ESCR_flag)
+	fmt.Fprintf(file, "ES_rate_flag:%d\n", pkg.ES_rate_flag)
+	fmt.Fprintf(file, "DSM_trick_mode_flag:%d\n", pkg.DSM_trick_mode_flag)
+	fmt.Fprintf(file, "additional_copy_info_flag:%d\n", pkg.Additional_copy_info_flag)
+	fmt.Fprintf(file, "PES_CRC_flag:%d\n", pkg.PES_CRC_flag)
+	fmt.Fprintf(file, "PES_extension_flag:%d\n", pkg.PES_extension_flag)
+	fmt.Fprintf(file, "PES_header_data_length:%d\n", pkg.PES_header_data_length)
 	if pkg.PTS_DTS_flags&0x02 == 0x02 {
-		file.WriteString(fmt.Sprintf("PTS:%d\n", pkg.Pts))
+		fmt.Fprintf(file, "PTS:%d\n", pkg.Pts)
 	}
 	if pkg.PTS_DTS_flags&0x03 == 0x03 {
-		file.WriteString(fmt.Sprintf("DTS:%d\n", pkg.Dts))
+		fmt.Fprintf(file, "DTS:%d\n", pkg.Dts)
 	}
 
 	if pkg.ESCR_flag == 1 {
-		file.WriteString(fmt.Sprintf("ESCR_base:%d\n", pkg.ESCR_base))
-		file.WriteString(fmt.Sprintf("ESCR_extension:%d\n", pkg.ESCR_extension))
+		fmt.Fprintf(file, "ESCR_base:%d\n", pkg.ESCR_base)
+		fmt.Fprintf(file, "ESCR_extension:%d\n", pkg.ESCR_extension)
 	}
 
 	if pkg.ES_rate_flag == 1 {
-		file.WriteString(fmt.Sprintf("ES_rate:%d\n", pkg.ES_rate))
+		fmt.Fprintf(file, "ES_rate:%d\n", pkg.ES_rate)
 	}
 
 	if pkg.DSM_trick_mode_flag == 1 {
-		file.WriteString(fmt.Sprintf("trick_mode_control:%d\n", pkg.Trick_mode_control))
+		fmt.Fprintf(file, "trick_mode_control:%d\n", pkg.Trick_mode_control)
 	}
 
 	if pkg.Additional_copy_info_flag == 1 {
-		file.WriteString(fmt.Sprintf("additional_copy_info:%d\n", pkg.Additional_copy_info))
+		fmt.Fprintf(file, "additional_copy_info:%d\n", pkg.Additional_copy_info)
 	}
 
 	if pkg.PES_CRC_flag == 1 {
-		file.WriteString(fmt.Sprintf("previous_PES_packet_CRC:%d\n", pkg.Previous_PES_packet_CRC))
+		fmt.Fprintf(file, "previous_PES_packet_CRC:%d\n", pkg.Previous_PES_packet_CRC)
 	}
 	file.WriteString("PES_packet_data_byte:\n")
-	file.WriteString(fmt.Sprintf("  Size: %d\n", len(pkg.Pes_payload)))
+	fmt.Fprintf(file, "  Size: %d\n", len(pkg.Pes_payload))
 	file.WriteString("  data:")
 	for i := 0; i < 12 && i < len(pkg.Pes_payload); i++ {
 		if i%4 == 0 {
 			file.WriteString("\n")
 			file.WriteString("      ")
 		}
-		file.WriteString(fmt.Sprintf("0x%02x ", pkg.Pes_payload[i]))
+		fmt.Fprintf(file, "0x%02x ", pkg.Pes_payload[i])
 	}
 	file.WriteString("\n")
 }

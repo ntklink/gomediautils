@@ -80,10 +80,6 @@ func newMediaProducer(name string, sess *MediaSession) *MediaProducer {
 	}
 }
 
-func (producer *MediaProducer) start() {
-	go producer.dispatch()
-}
-
 func (producer *MediaProducer) stop() {
 	producer.die.Do(func() {
 		close(producer.quit)
@@ -184,7 +180,8 @@ func (sess *MediaSession) init() {
 	})
 
 	sess.handle.OnStateChange(func(newState rtmp.RtmpState) {
-		if newState == rtmp.STATE_RTMP_PLAY_START {
+		switch newState {
+		case rtmp.STATE_RTMP_PLAY_START:
 			fmt.Println("play start")
 			name := sess.handle.GetStreamName()
 			source := center.find(name)
@@ -195,7 +192,7 @@ func (sess *MediaSession) init() {
 				sess.setReady()
 				go sess.sendToClient()
 			}
-		} else if newState == rtmp.STATE_RTMP_PUBLISH_START {
+		case rtmp.STATE_RTMP_PUBLISH_START:
 			fmt.Println("publish start")
 			sess.handle.OnFrame(func(cid codec.CodecID, pts, dts uint32, frame []byte) {
 				f := &MediaFrame{

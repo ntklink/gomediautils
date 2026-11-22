@@ -254,11 +254,12 @@ func (req *RtspRequest) parseFirstLine(firstLine string) error {
 	}
 	req.Method = sets[0]
 	req.Uri = sets[1]
-	if sets[2] == "RTSP/1.0" {
+	switch sets[2] {
+	case "RTSP/1.0":
 		req.Version = RTSP_1_0
-	} else if sets[2] == "RTSP/2.0" {
+	case "RTSP/2.0":
 		req.Version = RTSP_2_0
-	} else {
+	default:
 		return errors.New("rtsp parse request failed,unsupport rtsp version")
 	}
 	return nil
@@ -267,9 +268,10 @@ func (req *RtspRequest) parseFirstLine(firstLine string) error {
 func (req *RtspRequest) Encode() string {
 	request := req.Method
 	request += " " + req.Uri
-	if req.Version == RTSP_1_0 {
+	switch req.Version {
+	case RTSP_1_0:
 		request += " " + "RTSP/1.0\r\n"
-	} else if req.Version == RTSP_2_0 {
+	case RTSP_2_0:
 		request += " " + "RTSP/2.0\r\n"
 	}
 	if req.Fileds == nil {
@@ -310,14 +312,6 @@ func makePlay(uri string, cseq int32) RtspRequest {
 	return makeCommonReq(PLAY, uri, cseq)
 }
 
-func makeTeardown(uri string, cseq int32) RtspRequest {
-	return makeCommonReq(TEARDOWN, uri, cseq)
-}
-
-func makePause(uri string, cseq int32) RtspRequest {
-	return makeCommonReq(PAUSE, uri, cseq)
-}
-
 // makeAnnounce builds the request that publishes a session description.
 //
 // ANNOUNCE always carries a body, and rfc2326 12.16 makes Content-Type
@@ -332,10 +326,6 @@ func makeAnnounce(uri string, cseq int32) RtspRequest {
 
 func makeRecord(uri string, cseq int32) RtspRequest {
 	return makeCommonReq(RECORD, uri, cseq)
-}
-
-func makeRedirect(uri string, cseq int32) RtspRequest {
-	return makeCommonReq(REDIRECT, uri, cseq)
 }
 
 func makeCommonReq(method string, uri string, cseq int32) RtspRequest {
@@ -438,11 +428,12 @@ func (res *RtspResponse) parseFirstLine(firstLine string) error {
 		return errors.New("parse rtsp request first line failed")
 	}
 
-	if sets[0] == "RTSP/1.0" {
+	switch sets[0] {
+	case "RTSP/1.0":
 		res.Version = RTSP_1_0
-	} else if sets[0] == "RTSP/2.0" {
+	case "RTSP/2.0":
 		res.Version = RTSP_2_0
-	} else {
+	default:
 		return errors.New("rtsp parse response failed,unsupport rtsp version")
 	}
 	statusCode, err := strconv.Atoi(strings.TrimSpace(sets[1]))
@@ -456,11 +447,12 @@ func (res *RtspResponse) parseFirstLine(firstLine string) error {
 
 func (res *RtspResponse) Encode() string {
 	var response string = ""
-	if res.Version == RTSP_1_0 {
+	switch res.Version {
+	case RTSP_1_0:
 		response += "RTSP/1.0 "
-	} else if res.Version == RTSP_2_0 {
+	case RTSP_2_0:
 		response += "RTSP/2.0 "
-	} else {
+	default:
 		response += "RTSP/1.0 "
 	}
 

@@ -150,7 +150,7 @@ func (tkhd *TrackHeaderBox) Encode() (int, []byte) {
 	offset += 2
 	binary.BigEndian.PutUint16(buf[offset:], tkhd.Volume)
 	offset += 4
-	for i, _ := range tkhd.Matrix {
+	for i := range tkhd.Matrix {
 		binary.BigEndian.PutUint32(buf[offset:], tkhd.Matrix[i])
 		offset += 4
 	}

@@ -102,11 +102,11 @@ type PSPackHeader struct {
 }
 
 func (ps_pkg_hdr *PSPackHeader) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("IsMpeg1:%t\n", ps_pkg_hdr.IsMpeg1))
-	file.WriteString(fmt.Sprintf("System_clock_reference_base:%d\n", ps_pkg_hdr.System_clock_reference_base))
-	file.WriteString(fmt.Sprintf("System_clock_reference_extension:%d\n", ps_pkg_hdr.System_clock_reference_extension))
-	file.WriteString(fmt.Sprintf("Program_mux_rate:%d\n", ps_pkg_hdr.Program_mux_rate))
-	file.WriteString(fmt.Sprintf("Pack_stuffing_length:%d\n", ps_pkg_hdr.Pack_stuffing_length))
+	fmt.Fprintf(file, "IsMpeg1:%t\n", ps_pkg_hdr.IsMpeg1)
+	fmt.Fprintf(file, "System_clock_reference_base:%d\n", ps_pkg_hdr.System_clock_reference_base)
+	fmt.Fprintf(file, "System_clock_reference_extension:%d\n", ps_pkg_hdr.System_clock_reference_extension)
+	fmt.Fprintf(file, "Program_mux_rate:%d\n", ps_pkg_hdr.Program_mux_rate)
+	fmt.Fprintf(file, "Pack_stuffing_length:%d\n", ps_pkg_hdr.Pack_stuffing_length)
 }
 
 func (ps_pkg_hdr *PSPackHeader) Decode(bs *codec.BitStream) error {
@@ -242,20 +242,20 @@ type System_header struct {
 }
 
 func (sh *System_header) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("Header_length:%d\n", sh.Header_length))
-	file.WriteString(fmt.Sprintf("Rate_bound:%d\n", sh.Rate_bound))
-	file.WriteString(fmt.Sprintf("Audio_bound:%d\n", sh.Audio_bound))
-	file.WriteString(fmt.Sprintf("Fixed_flag:%d\n", sh.Fixed_flag))
-	file.WriteString(fmt.Sprintf("CSPS_flag:%d\n", sh.CSPS_flag))
-	file.WriteString(fmt.Sprintf("System_audio_lock_flag:%d\n", sh.System_audio_lock_flag))
-	file.WriteString(fmt.Sprintf("System_video_lock_flag:%d\n", sh.System_video_lock_flag))
-	file.WriteString(fmt.Sprintf("Video_bound:%d\n", sh.Video_bound))
-	file.WriteString(fmt.Sprintf("Packet_rate_restriction_flag:%d\n", sh.Packet_rate_restriction_flag))
+	fmt.Fprintf(file, "Header_length:%d\n", sh.Header_length)
+	fmt.Fprintf(file, "Rate_bound:%d\n", sh.Rate_bound)
+	fmt.Fprintf(file, "Audio_bound:%d\n", sh.Audio_bound)
+	fmt.Fprintf(file, "Fixed_flag:%d\n", sh.Fixed_flag)
+	fmt.Fprintf(file, "CSPS_flag:%d\n", sh.CSPS_flag)
+	fmt.Fprintf(file, "System_audio_lock_flag:%d\n", sh.System_audio_lock_flag)
+	fmt.Fprintf(file, "System_video_lock_flag:%d\n", sh.System_video_lock_flag)
+	fmt.Fprintf(file, "Video_bound:%d\n", sh.Video_bound)
+	fmt.Fprintf(file, "Packet_rate_restriction_flag:%d\n", sh.Packet_rate_restriction_flag)
 	for i, es := range sh.Streams {
-		file.WriteString(fmt.Sprintf("----streams %d\n", i))
-		file.WriteString(fmt.Sprintf("    Stream_id:%d\n", es.Stream_id))
-		file.WriteString(fmt.Sprintf("    P_STD_buffer_bound_scale:%d\n", es.P_STD_buffer_bound_scale))
-		file.WriteString(fmt.Sprintf("    P_STD_buffer_size_bound:%d\n", es.P_STD_buffer_size_bound))
+		fmt.Fprintf(file, "----streams %d\n", i)
+		fmt.Fprintf(file, "    Stream_id:%d\n", es.Stream_id)
+		fmt.Fprintf(file, "    P_STD_buffer_bound_scale:%d\n", es.P_STD_buffer_bound_scale)
+		fmt.Fprintf(file, "    P_STD_buffer_size_bound:%d\n", es.P_STD_buffer_size_bound)
 	}
 }
 
@@ -379,14 +379,14 @@ type Program_stream_map struct {
 }
 
 func (psm *Program_stream_map) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("map_stream_id:%d\n", psm.Map_stream_id))
-	file.WriteString(fmt.Sprintf("program_stream_map_length:%d\n", psm.Program_stream_map_length))
-	file.WriteString(fmt.Sprintf("current_next_indicator:%d\n", psm.Current_next_indicator))
-	file.WriteString(fmt.Sprintf("program_stream_map_version:%d\n", psm.Program_stream_map_version))
-	file.WriteString(fmt.Sprintf("program_stream_info_length:%d\n", psm.Program_stream_info_length))
-	file.WriteString(fmt.Sprintf("elementary_stream_map_length:%d\n", psm.Elementary_stream_map_length))
+	fmt.Fprintf(file, "map_stream_id:%d\n", psm.Map_stream_id)
+	fmt.Fprintf(file, "program_stream_map_length:%d\n", psm.Program_stream_map_length)
+	fmt.Fprintf(file, "current_next_indicator:%d\n", psm.Current_next_indicator)
+	fmt.Fprintf(file, "program_stream_map_version:%d\n", psm.Program_stream_map_version)
+	fmt.Fprintf(file, "program_stream_info_length:%d\n", psm.Program_stream_info_length)
+	fmt.Fprintf(file, "elementary_stream_map_length:%d\n", psm.Elementary_stream_map_length)
 	for i, es := range psm.Stream_map {
-		file.WriteString(fmt.Sprintf("----ES stream %d\n", i))
+		fmt.Fprintf(file, "----ES stream %d\n", i)
 		if es.Stream_type == uint8(PS_STREAM_AAC) {
 			file.WriteString("    stream_type:AAC\n")
 		} else if es.Stream_type == uint8(PS_STREAM_G711A) {
@@ -398,8 +398,8 @@ func (psm *Program_stream_map) PrettyPrint(file *os.File) {
 		} else if es.Stream_type == uint8(PS_STREAM_H265) {
 			file.WriteString("    stream_type:H265\n")
 		}
-		file.WriteString(fmt.Sprintf("    elementary_stream_id:%d\n", es.Elementary_stream_id))
-		file.WriteString(fmt.Sprintf("    elementary_stream_info_length:%d\n", es.Elementary_stream_info_length))
+		fmt.Fprintf(file, "    elementary_stream_id:%d\n", es.Elementary_stream_id)
+		fmt.Fprintf(file, "    elementary_stream_info_length:%d\n", es.Elementary_stream_info_length)
 	}
 }
 

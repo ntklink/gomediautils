@@ -5,17 +5,12 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
-	"time"
 
 	"github.com/ntklink/gomediautils/go-codec"
 	"github.com/ntklink/gomediautils/go-rtsp/rtcp"
 	"github.com/ntklink/gomediautils/go-rtsp/rtp"
 	"github.com/ntklink/gomediautils/go-rtsp/sdp"
 )
-
-func init() {
-	rand.Seed(time.Now().Unix())
-}
 
 type RtspSample struct {
 	Cid       RTSP_CODEC_ID
@@ -155,7 +150,8 @@ func (track *RtspTrack) OnSample(onsample OnSampleCallBack) {
 			Timestamp: timestamp, //uint32(uint64() * 1000 / uint64(track.Codec.SampleRate)),
 			Completed: !lost,
 		}
-		if sample.Cid == RTSP_CODEC_H264 {
+		switch sample.Cid {
+		case RTSP_CODEC_H264:
 			nalu_type := codec.H264NaluType(frame)
 			switch nalu_type {
 			case codec.H264_NAL_SPS:
@@ -179,7 +175,7 @@ func (track *RtspTrack) OnSample(onsample OnSampleCallBack) {
 					}
 				}
 			}
-		} else if sample.Cid == RTSP_CODEC_H265 {
+		case RTSP_CODEC_H265:
 			nalu_type := codec.H265NaluType(frame)
 			switch nalu_type {
 			case codec.H265_NAL_PPS:

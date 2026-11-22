@@ -335,14 +335,15 @@ func (psdemuxer *PSDemuxer) demuxH26x(stream *psstream, pes *PesPacket) error {
 		if end < 0 {
 			break
 		}
-		if stream.cid == PS_STREAM_H264 {
+		switch stream.cid {
+		case PS_STREAM_H264:
 			naluType := codec.H264NaluType(stream.streamBuf[start:])
 			if naluType != codec.H264_NAL_AUD {
 				if psdemuxer.OnFrame != nil {
 					psdemuxer.OnFrame(stream.streamBuf[start:end], stream.cid, stream.pts/90, stream.dts/90)
 				}
 			}
-		} else if stream.cid == PS_STREAM_H265 {
+		case PS_STREAM_H265:
 			naluType := codec.H265NaluType(stream.streamBuf[start:])
 			if naluType != codec.H265_NAL_AUD {
 				if psdemuxer.OnFrame != nil {

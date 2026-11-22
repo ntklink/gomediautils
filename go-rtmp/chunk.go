@@ -83,9 +83,10 @@ func (bh *basicHead) encode() ([]byte, error) {
 func (bh *basicHead) decode(data []byte) {
 	bh.fmt = data[0] >> 6
 	bh.csid = uint32(data[0] & 0x3F)
-	if bh.csid == 0 {
+	switch bh.csid {
+	case 0:
 		bh.csid = uint32(data[1]) + 64
-	} else if bh.csid == 1 {
+	case 1:
 		bh.csid = uint32(data[2])*256 + uint32(data[1]) + 64
 	}
 }
@@ -131,15 +132,6 @@ func (cmh *chunkMsgHead) encodeTo(format uint8, dst []byte) (int, error) {
 	return int(ChunkType[format]), nil
 }
 
-func (cmh *chunkMsgHead) encode(format uint8) ([]byte, error) {
-	hdr := make([]byte, 11)
-	n, err := cmh.encodeTo(format, hdr)
-	if err != nil {
-		return nil, err
-	}
-	return hdr[:n], nil
-}
-
 func (cmh *chunkMsgHead) decode(format uint8, data []byte) error {
 	switch format {
 	case 0:
@@ -164,9 +156,10 @@ func clacBasicHeadLen(data []byte) int {
 	length := 1
 	csid := data[0] & 0x3F
 
-	if csid == 0 {
+	switch csid {
+	case 0:
 		length += 1
-	} else if csid == 1 {
+	case 1:
 		length += 2
 	}
 

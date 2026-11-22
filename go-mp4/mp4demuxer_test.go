@@ -34,9 +34,10 @@ func TestCreateMovDemuxer(t *testing.T) {
 			break
 		}
 		fmt.Printf("track:%d,cid:%+v,pts:%d dts:%d\n", pkg.TrackId, pkg.Cid, pkg.Pts, pkg.Dts)
-		if pkg.Cid == MP4_CODEC_H264 {
+		switch pkg.Cid {
+		case MP4_CODEC_H264:
 			vfile.Write(pkg.Data)
-		} else if pkg.Cid == MP4_CODEC_AAC {
+		case MP4_CODEC_AAC:
 			afile.Write(pkg.Data)
 		}
 	}

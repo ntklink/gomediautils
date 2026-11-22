@@ -35,15 +35,16 @@ func (p *hlsPlaylist) makeM3u8() string {
 	}
 
 	m3u.WriteString("#EXTM3U\n")
-	m3u.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", maxDuration))
+	fmt.Fprintf(m3u, "#EXT-X-TARGETDURATION:%d\n", maxDuration)
 	// version 7 is the first that allows fragmented mp4 segments
 	m3u.WriteString("#EXT-X-VERSION:7\n")
 	m3u.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	m3u.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
-	m3u.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=%q\n", p.initUri))
+	fmt.Fprintf(m3u, "#EXT-X-MAP:URI=%q\n", p.initUri)
 	for _, seg := range p.segments {
-		m3u.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", seg.duration))
-		m3u.WriteString(seg.uri + "\n")
+		fmt.Fprintf(m3u, "#EXTINF:%.3f,\n", seg.duration)
+		m3u.WriteString(seg.uri)
+		m3u.WriteByte('\n')
 	}
 	m3u.WriteString("#EXT-X-ENDLIST\n")
 	return m3u.String()

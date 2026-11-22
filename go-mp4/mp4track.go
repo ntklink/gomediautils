@@ -194,11 +194,12 @@ func newmp4track(cid MP4_CODEC_TYPE, writer io.WriteSeeker) *mp4track {
 		startDts:  0,
 	}
 
-	if cid == MP4_CODEC_H264 {
+	switch cid {
+	case MP4_CODEC_H264:
 		track.extra = new(h264ExtraData)
-	} else if cid == MP4_CODEC_H265 {
+	case MP4_CODEC_H265:
 		track.extra = newh265ExtraData()
-	} else if cid == MP4_CODEC_AAC {
+	case MP4_CODEC_AAC:
 		track.extra = new(aacExtraData)
 	}
 	return track

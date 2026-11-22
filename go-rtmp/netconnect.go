@@ -46,7 +46,7 @@ func makeConnectRes() ([]byte, error) {
 		bytes()
 }
 
-func makeCreateStream(streamName string, tid int) ([]byte, error) {
+func makeCreateStream(tid int) ([]byte, error) {
 	var b amf0Buf
 	return b.item(makeStringItem("createStream")).
 		item(makeNumberItem(float64(tid))).
@@ -69,30 +69,5 @@ func makeGetStreamLength(transactionId int, streamName string) ([]byte, error) {
 		item(makeNumberItem(float64(transactionId))).
 		null().
 		item(makeStringItem(streamName)).
-		bytes()
-}
-
-func makeGetStreamLengthRes(transactionId int, duration float64) ([]byte, error) {
-	var b amf0Buf
-	return b.item(makeStringItem("_result")).
-		item(makeNumberItem(float64(transactionId))).
-		null().
-		item(makeNumberItem(duration)).
-		bytes()
-}
-
-func makeErrorRes(transactionId int, level, code, description string) ([]byte, error) {
-	des := amfObject{
-		items: []*amfObjectItem{
-			{name: "level", value: makeStringItem(level)},
-			{name: "code", value: makeStringItem(code)},
-			{name: "description", value: makeStringItem(description)},
-		},
-	}
-	var b amf0Buf
-	return b.item(makeStringItem("_error")).
-		item(makeNumberItem(float64(transactionId))).
-		null().
-		object(&des).
 		bytes()
 }

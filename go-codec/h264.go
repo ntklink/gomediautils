@@ -132,13 +132,14 @@ func (sps *SPS) Decode(bs *BitStream) {
 		return
 	}
 	sps.Pic_order_cnt_type = bs.ReadUE()
-	if sps.Pic_order_cnt_type == 0 {
+	switch sps.Pic_order_cnt_type {
+	case 0:
 		sps.Log2_max_pic_order_cnt_lsb_minus4 = bs.ReadUE()
 		if sps.Log2_max_pic_order_cnt_lsb_minus4 > 12 {
 			bs.Fail(errors.New("h264: log2_max_pic_order_cnt_lsb_minus4 > 12"))
 			return
 		}
-	} else if sps.Pic_order_cnt_type == 1 {
+	case 1:
 		sps.Delta_pic_order_always_zero_flag = bs.GetBit()
 		sps.Offset_for_non_ref_pic = bs.ReadSE()         // offset_for_non_ref_pic
 		sps.Offset_for_top_to_bottom_field = bs.ReadSE() // offset_for_top_to_bottom_field

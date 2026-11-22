@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"testing"
@@ -68,7 +67,7 @@ func TestCreateMp4Muxer(t *testing.T) {
 	}
 	defer mp4file.Close()
 
-	buf, _ := ioutil.ReadAll(f)
+	buf, _ := io.ReadAll(f)
 	pts := uint64(0)
 	dts := uint64(0)
 	ii := [3]uint64{33, 33, 34}
@@ -137,7 +136,7 @@ func TestMuxAAC(t *testing.T) {
 	}
 	defer mp4file.Close()
 
-	aac, _ := ioutil.ReadAll(f)
+	aac, _ := io.ReadAll(f)
 	var pts uint64 = 0
 	//var dts uint64 = 0
 	//var i int = 0
@@ -215,18 +214,19 @@ func TestMuxMp4(t *testing.T) {
 	demuxer := mpeg2.NewTSDemuxer()
 	demuxer.OnFrame = func(cid mpeg2.TS_STREAM_TYPE, frame []byte, pts uint64, dts uint64) {
 
-		if cid == mpeg2.TS_STREAM_AAC {
+		switch cid {
+		case mpeg2.TS_STREAM_AAC:
 			err = muxer.Write(atid, frame, uint64(pts), uint64(dts))
 			if err != nil {
 				panic(err)
 			}
-		} else if cid == mpeg2.TS_STREAM_H264 {
+		case mpeg2.TS_STREAM_H264:
 			fmt.Println("pts,dts,len", pts, dts, len(frame))
 			err = muxer.Write(vtid, frame, uint64(pts), uint64(dts))
 			if err != nil {
 				panic(err)
 			}
-		} else {
+		default:
 			panic("unkwon cid " + strconv.Itoa(int(cid)))
 		}
 	}

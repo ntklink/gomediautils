@@ -1,7 +1,7 @@
 package flv
 
 import (
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,9 +43,10 @@ func TestFlvReader_Input(t *testing.T) {
 		audioFile := createOutput(t, "a.aac")
 		f := CreateFlvReader()
 		f.OnFrame = func(cid codec.CodecID, frame []byte, pts, dts uint32) {
-			if cid == codec.CODECID_VIDEO_H264 {
+			switch cid {
+			case codec.CODECID_VIDEO_H264:
 				videoFile.Write(frame)
-			} else if cid == codec.CODECID_AUDIO_AAC {
+			case codec.CODECID_AUDIO_AAC:
 				audioFile.Write(frame)
 			}
 		}
@@ -72,17 +73,18 @@ func TestFlvWriter_Write(t *testing.T) {
 		}
 		rf := CreateFlvReader()
 		rf.OnFrame = func(cid codec.CodecID, frame []byte, pts, dts uint32) {
-			if cid == codec.CODECID_VIDEO_H264 {
+			switch cid {
+			case codec.CODECID_VIDEO_H264:
 				if err := wf.WriteH264(frame, pts, dts); err != nil {
 					t.Errorf("WriteH264() error = %v", err)
 				}
-			} else if cid == codec.CODECID_AUDIO_AAC {
+			case codec.CODECID_AUDIO_AAC:
 				if err := wf.WriteAAC(frame, pts, dts); err != nil {
 					t.Errorf("WriteAAC() error = %v", err)
 				}
 			}
 		}
-		content, err := ioutil.ReadAll(fd)
+		content, err := io.ReadAll(fd)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,7 +104,7 @@ func TestFlvWriter_WriteHevc(t *testing.T) {
 		}
 		var pts uint32 = 0
 		var dts uint32 = 0
-		buf, err := ioutil.ReadAll(rawh265)
+		buf, err := io.ReadAll(rawh265)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +129,7 @@ func TestFlvReadH265(t *testing.T) {
 				videoFile.Write(frame)
 			}
 		}
-		content, err := ioutil.ReadAll(fd)
+		content, err := io.ReadAll(fd)
 		if err != nil {
 			t.Fatal(err)
 		}

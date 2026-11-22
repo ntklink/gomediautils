@@ -247,10 +247,11 @@ func (demuxer *TSDemuxer) Input(r io.Reader) error {
 					pkg.Payload = bs.RemainData()
 				}
 				stype := findPESIDByStreamType(stream.cid)
-				if stype == PES_STREAM_AUDIO {
+				switch stype {
+				case PES_STREAM_AUDIO:
 					demuxer.doAudioPesPacket(stream, start)
-				} else if stype == PES_STREAM_VIDEO {
-					demuxer.doVideoPesPacket(stream, start)
+				case PES_STREAM_VIDEO:
+					demuxer.doVideoPesPacket(stream)
 				}
 				if len(stream.hdrCache) > 0 {
 					// payload has been copied into the frame buffer
@@ -324,7 +325,7 @@ func (demuxer *TSDemuxer) flush() {
 	}
 }
 
-func (demuxer *TSDemuxer) doVideoPesPacket(stream *tsstream, start uint8) {
+func (demuxer *TSDemuxer) doVideoPesPacket(stream *tsstream) {
 	if stream.cid != TS_STREAM_H264 && stream.cid != TS_STREAM_H265 {
 		return
 	}

@@ -51,7 +51,6 @@ func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
 
 	b := &SgpdBox{
 		Version: version,
-		Flags:   versionAndFlags & 0x00ffffff,
 	}
 	b.GroupingType = string(buf[n : n+4])
 	n += 4
@@ -67,8 +66,7 @@ func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
 		if err = checkRemain(buf, n, 4); err != nil {
 			return
 		}
-		b.DefaultGroupDescriptionIndex = binary.BigEndian.Uint32(buf[n:])
-		n += 4
+		n += 4 // Skip the unused default_group_description_index.
 	}
 	if err = checkRemain(buf, n, 4); err != nil {
 		return

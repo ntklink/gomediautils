@@ -40,10 +40,6 @@ var fpKey [62]byte = [62]byte{
 var clientVersion [4]byte = [4]byte{0x80, 0x00, 0x07, 0x02}
 var serverVersion [4]byte = [4]byte{0x04, 0x05, 0x00, 0x01}
 
-func init() {
-	rand.Seed(time.Now().Unix())
-}
-
 // https://blog.csdn.net/win_lin/article/details/13006803
 
 // schema == 0 1536 bytes

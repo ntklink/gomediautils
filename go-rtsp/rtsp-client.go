@@ -286,22 +286,6 @@ func (client *RtspClient) sendRtspRequestWithHandler(req *RtspRequest, handler f
 	return client.sendToServer(encoded)
 }
 
-func (client *RtspClient) sendRtspRequest(req *RtspRequest) error {
-	client.reqMu.Lock()
-	client.lastRequest = req
-	if client.auth != nil {
-		client.auth.setMethod(req.Method)
-		client.auth.setUri(req.Uri)
-		req.Fileds[Authorization] = client.auth.authenticateInfo()
-	}
-	if client.sessionId != "" {
-		req.Fileds[Session] = client.sessionId
-	}
-	encoded := []byte(req.Encode())
-	client.reqMu.Unlock()
-	return client.sendToServer(encoded)
-}
-
 func (client *RtspClient) sendToServer(data []byte) error {
 	client.outMu.Lock()
 	cb := client.output

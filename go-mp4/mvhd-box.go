@@ -101,7 +101,7 @@ func (mvhd *MovieHeaderBox) Decode(r io.Reader) (offset int, err error) {
 	mvhd.Volume = binary.BigEndian.Uint16(buf[n:])
 	n += 12
 
-	for i, _ := range mvhd.Matrix {
+	for i := range mvhd.Matrix {
 		mvhd.Matrix[i] = binary.BigEndian.Uint32(buf[n:])
 		n += 4
 	}
@@ -141,7 +141,7 @@ func (mvhd *MovieHeaderBox) Encode() (int, []byte) {
 	binary.BigEndian.PutUint16(buf[offset:], mvhd.Volume)
 	offset += 2
 	offset += 10
-	for i, _ := range mvhd.Matrix {
+	for i := range mvhd.Matrix {
 		binary.BigEndian.PutUint32(buf[offset:], mvhd.Matrix[i])
 		offset += 4
 	}

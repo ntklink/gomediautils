@@ -132,11 +132,12 @@ func TestRtmpClient_Pub(t *testing.T) {
 			fmt.Println("start to read flv")
 			f := flv.CreateFlvReader()
 			f.OnFrame = func(cid codec.CodecID, frame []byte, pts, dts uint32) {
-				if cid == codec.CODECID_VIDEO_H264 {
+				switch cid {
+				case codec.CODECID_VIDEO_H264:
 					fmt.Println("write video frame", pts, dts)
 					cli.WriteVideo(cid, frame, pts, dts)
 					time.Sleep(time.Millisecond * 33)
-				} else if cid == codec.CODECID_AUDIO_AAC {
+				case codec.CODECID_AUDIO_AAC:
 					cli.WriteAudio(cid, frame, pts, dts)
 				}
 			}

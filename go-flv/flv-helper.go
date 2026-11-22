@@ -31,33 +31,36 @@ func GetInt24(b []byte) int32 {
 }
 
 func CovertFlvVideoCodecId2MpegCodecId(cid FLV_VIDEO_CODEC_ID) codec.CodecID {
-	if cid == FLV_AVC {
+	switch cid {
+	case FLV_AVC:
 		return codec.CODECID_VIDEO_H264
-	} else if cid == FLV_HEVC {
+	case FLV_HEVC:
 		return codec.CODECID_VIDEO_H265
 	}
 	return codec.CODECID_UNRECOGNIZED
 }
 
 func CovertFlvAudioCodecId2MpegCodecId(cid FLV_SOUND_FORMAT) codec.CodecID {
-	if cid == FLV_AAC {
+	switch cid {
+	case FLV_AAC:
 		return codec.CODECID_AUDIO_AAC
-	} else if cid == FLV_G711A {
+	case FLV_G711A:
 		return codec.CODECID_AUDIO_G711A
-	} else if cid == FLV_G711U {
+	case FLV_G711U:
 		return codec.CODECID_AUDIO_G711U
-	} else if cid == FLV_MP3 {
+	case FLV_MP3:
 		return codec.CODECID_AUDIO_MP3
 	}
 	return codec.CODECID_UNRECOGNIZED
 }
 
 func CovertCodecId2FlvVideoCodecId(cid codec.CodecID) FLV_VIDEO_CODEC_ID {
-	if cid == codec.CODECID_VIDEO_H264 {
+	switch cid {
+	case codec.CODECID_VIDEO_H264:
 		return FLV_AVC
-	} else if cid == codec.CODECID_VIDEO_H265 {
+	case codec.CODECID_VIDEO_H265:
 		return FLV_HEVC
-	} else {
+	default:
 		return FLV_VIDEO_CODEC_UNKNOWN
 	}
 }

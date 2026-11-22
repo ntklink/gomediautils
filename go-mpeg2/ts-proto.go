@@ -81,13 +81,13 @@ type TSPacket struct {
 }
 
 func (pkg *TSPacket) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("Transport_error_indicator:%d\n", pkg.Transport_error_indicator))
-	file.WriteString(fmt.Sprintf("Payload_unit_start_indicator:%d\n", pkg.Payload_unit_start_indicator))
-	file.WriteString(fmt.Sprintf("Transport_priority:%d\n", pkg.Transport_priority))
-	file.WriteString(fmt.Sprintf("PID:%d\n", pkg.PID))
-	file.WriteString(fmt.Sprintf("Transport_scrambling_control:%d\n", pkg.Transport_scrambling_control))
-	file.WriteString(fmt.Sprintf("Adaptation_field_control:%d\n", pkg.Adaptation_field_control))
-	file.WriteString(fmt.Sprintf("Continuity_counter:%d\n", pkg.Continuity_counter))
+	fmt.Fprintf(file, "Transport_error_indicator:%d\n", pkg.Transport_error_indicator)
+	fmt.Fprintf(file, "Payload_unit_start_indicator:%d\n", pkg.Payload_unit_start_indicator)
+	fmt.Fprintf(file, "Transport_priority:%d\n", pkg.Transport_priority)
+	fmt.Fprintf(file, "PID:%d\n", pkg.PID)
+	fmt.Fprintf(file, "Transport_scrambling_control:%d\n", pkg.Transport_scrambling_control)
+	fmt.Fprintf(file, "Adaptation_field_control:%d\n", pkg.Adaptation_field_control)
+	fmt.Fprintf(file, "Continuity_counter:%d\n", pkg.Continuity_counter)
 }
 
 func (pkg *TSPacket) EncodeHeader(bsw *codec.BitStreamWriter) {
@@ -226,44 +226,44 @@ type Adaptation_field struct {
 }
 
 func (adaptation *Adaptation_field) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("Adaptation_field_length:%d\n", adaptation.Adaptation_field_length))
-	file.WriteString(fmt.Sprintf("Discontinuity_indicator:%d\n", adaptation.Discontinuity_indicator))
-	file.WriteString(fmt.Sprintf("Random_access_indicator:%d\n", adaptation.Random_access_indicator))
-	file.WriteString(fmt.Sprintf("Elementary_stream_priority_indicator:%d\n", adaptation.Elementary_stream_priority_indicator))
-	file.WriteString(fmt.Sprintf("PCR_flag:%d\n", adaptation.PCR_flag))
-	file.WriteString(fmt.Sprintf("OPCR_flag:%d\n", adaptation.OPCR_flag))
-	file.WriteString(fmt.Sprintf("Splicing_point_flag:%d\n", adaptation.Splicing_point_flag))
-	file.WriteString(fmt.Sprintf("Transport_private_data_flag:%d\n", adaptation.Transport_private_data_flag))
-	file.WriteString(fmt.Sprintf("Adaptation_field_extension_flag:%d\n", adaptation.Adaptation_field_extension_flag))
+	fmt.Fprintf(file, "Adaptation_field_length:%d\n", adaptation.Adaptation_field_length)
+	fmt.Fprintf(file, "Discontinuity_indicator:%d\n", adaptation.Discontinuity_indicator)
+	fmt.Fprintf(file, "Random_access_indicator:%d\n", adaptation.Random_access_indicator)
+	fmt.Fprintf(file, "Elementary_stream_priority_indicator:%d\n", adaptation.Elementary_stream_priority_indicator)
+	fmt.Fprintf(file, "PCR_flag:%d\n", adaptation.PCR_flag)
+	fmt.Fprintf(file, "OPCR_flag:%d\n", adaptation.OPCR_flag)
+	fmt.Fprintf(file, "Splicing_point_flag:%d\n", adaptation.Splicing_point_flag)
+	fmt.Fprintf(file, "Transport_private_data_flag:%d\n", adaptation.Transport_private_data_flag)
+	fmt.Fprintf(file, "Adaptation_field_extension_flag:%d\n", adaptation.Adaptation_field_extension_flag)
 	if adaptation.PCR_flag == 1 {
-		file.WriteString(fmt.Sprintf("Program_clock_reference_base:%d\n", adaptation.Program_clock_reference_base))
-		file.WriteString(fmt.Sprintf("Program_clock_reference_extension:%d\n", adaptation.Program_clock_reference_extension))
+		fmt.Fprintf(file, "Program_clock_reference_base:%d\n", adaptation.Program_clock_reference_base)
+		fmt.Fprintf(file, "Program_clock_reference_extension:%d\n", adaptation.Program_clock_reference_extension)
 	}
 	if adaptation.OPCR_flag == 1 {
-		file.WriteString(fmt.Sprintf("Original_program_clock_reference_base:%d\n", adaptation.Original_program_clock_reference_base))
-		file.WriteString(fmt.Sprintf("Original_program_clock_reference_extension:%d\n", adaptation.Original_program_clock_reference_extension))
+		fmt.Fprintf(file, "Original_program_clock_reference_base:%d\n", adaptation.Original_program_clock_reference_base)
+		fmt.Fprintf(file, "Original_program_clock_reference_extension:%d\n", adaptation.Original_program_clock_reference_extension)
 	}
 	if adaptation.Splicing_point_flag == 1 {
-		file.WriteString(fmt.Sprintf("Splice_countdown:%d\n", adaptation.Splice_countdown))
+		fmt.Fprintf(file, "Splice_countdown:%d\n", adaptation.Splice_countdown)
 	}
 	if adaptation.Transport_private_data_flag == 1 {
-		file.WriteString(fmt.Sprintf("Transport_private_data_length:%d\n", adaptation.Transport_private_data_length))
+		fmt.Fprintf(file, "Transport_private_data_length:%d\n", adaptation.Transport_private_data_length)
 	}
 	if adaptation.Adaptation_field_extension_flag == 1 {
-		file.WriteString(fmt.Sprintf("Adaptation_field_extension_length:%d\n", adaptation.Adaptation_field_extension_length))
-		file.WriteString(fmt.Sprintf("Ltw_flag:%d\n", adaptation.Ltw_flag))
-		file.WriteString(fmt.Sprintf("Piecewise_rate_flag:%d\n", adaptation.Piecewise_rate_flag))
-		file.WriteString(fmt.Sprintf("Seamless_splice_flag:%d\n", adaptation.Seamless_splice_flag))
+		fmt.Fprintf(file, "Adaptation_field_extension_length:%d\n", adaptation.Adaptation_field_extension_length)
+		fmt.Fprintf(file, "Ltw_flag:%d\n", adaptation.Ltw_flag)
+		fmt.Fprintf(file, "Piecewise_rate_flag:%d\n", adaptation.Piecewise_rate_flag)
+		fmt.Fprintf(file, "Seamless_splice_flag:%d\n", adaptation.Seamless_splice_flag)
 		if adaptation.Ltw_flag == 1 {
-			file.WriteString(fmt.Sprintf("Ltw_valid_flag:%d\n", adaptation.Ltw_valid_flag))
-			file.WriteString(fmt.Sprintf("Ltw_offset:%d\n", adaptation.Ltw_offset))
+			fmt.Fprintf(file, "Ltw_valid_flag:%d\n", adaptation.Ltw_valid_flag)
+			fmt.Fprintf(file, "Ltw_offset:%d\n", adaptation.Ltw_offset)
 		}
 		if adaptation.Piecewise_rate_flag == 1 {
-			file.WriteString(fmt.Sprintf("Piecewise_rate:%d\n", adaptation.Piecewise_rate))
+			fmt.Fprintf(file, "Piecewise_rate:%d\n", adaptation.Piecewise_rate)
 		}
 		if adaptation.Seamless_splice_flag == 1 {
-			file.WriteString(fmt.Sprintf("Splice_type:%d\n", adaptation.Splice_type))
-			file.WriteString(fmt.Sprintf("DTS_next_AU:%d\n", adaptation.DTS_next_AU))
+			fmt.Fprintf(file, "Splice_type:%d\n", adaptation.Splice_type)
+			fmt.Fprintf(file, "DTS_next_AU:%d\n", adaptation.DTS_next_AU)
 		}
 	}
 }
@@ -456,21 +456,21 @@ func NewPat() *Pat {
 }
 
 func (pat *Pat) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("Table id:%d\n", pat.Table_id))
-	file.WriteString(fmt.Sprintf("Section_syntax_indicator:%d\n", pat.Section_syntax_indicator))
-	file.WriteString(fmt.Sprintf("Section_length:%d\n", pat.Section_length))
-	file.WriteString(fmt.Sprintf("Transport_stream_id:%d\n", pat.Transport_stream_id))
-	file.WriteString(fmt.Sprintf("Version_number:%d\n", pat.Version_number))
-	file.WriteString(fmt.Sprintf("Current_next_indicator:%d\n", pat.Current_next_indicator))
-	file.WriteString(fmt.Sprintf("Section_number:%d\n", pat.Section_number))
-	file.WriteString(fmt.Sprintf("Last_section_number:%d\n", pat.Last_section_number))
+	fmt.Fprintf(file, "Table id:%d\n", pat.Table_id)
+	fmt.Fprintf(file, "Section_syntax_indicator:%d\n", pat.Section_syntax_indicator)
+	fmt.Fprintf(file, "Section_length:%d\n", pat.Section_length)
+	fmt.Fprintf(file, "Transport_stream_id:%d\n", pat.Transport_stream_id)
+	fmt.Fprintf(file, "Version_number:%d\n", pat.Version_number)
+	fmt.Fprintf(file, "Current_next_indicator:%d\n", pat.Current_next_indicator)
+	fmt.Fprintf(file, "Section_number:%d\n", pat.Section_number)
+	fmt.Fprintf(file, "Last_section_number:%d\n", pat.Last_section_number)
 	for i, pmt := range pat.Pmts {
-		file.WriteString(fmt.Sprintf("----pmt %d\n", i))
-		file.WriteString(fmt.Sprintf("    program_number:%d\n", pmt.Program_number))
+		fmt.Fprintf(file, "----pmt %d\n", i)
+		fmt.Fprintf(file, "    program_number:%d\n", pmt.Program_number)
 		if pmt.Program_number == 0x0000 {
-			file.WriteString(fmt.Sprintf("    network_PID:%d\n", pmt.PID))
+			fmt.Fprintf(file, "    network_PID:%d\n", pmt.PID)
 		} else {
-			file.WriteString(fmt.Sprintf("    program_map_PID:%d\n", pmt.PID))
+			fmt.Fprintf(file, "    program_map_PID:%d\n", pmt.PID)
 		}
 	}
 }
@@ -569,18 +569,18 @@ func NewPmt() *Pmt {
 }
 
 func (pmt *Pmt) PrettyPrint(file *os.File) {
-	file.WriteString(fmt.Sprintf("Table id:%d\n", pmt.Table_id))
-	file.WriteString(fmt.Sprintf("Section_syntax_indicator:%d\n", pmt.Section_syntax_indicator))
-	file.WriteString(fmt.Sprintf("Section_length:%d\n", pmt.Section_length))
-	file.WriteString(fmt.Sprintf("Program_number:%d\n", pmt.Program_number))
-	file.WriteString(fmt.Sprintf("Version_number:%d\n", pmt.Version_number))
-	file.WriteString(fmt.Sprintf("Current_next_indicator:%d\n", pmt.Current_next_indicator))
-	file.WriteString(fmt.Sprintf("Section_number:%d\n", pmt.Section_number))
-	file.WriteString(fmt.Sprintf("Last_section_number:%d\n", pmt.Last_section_number))
-	file.WriteString(fmt.Sprintf("PCR_PID:%d\n", pmt.PCR_PID))
-	file.WriteString(fmt.Sprintf("program_info_length:%d\n", pmt.Program_info_length))
+	fmt.Fprintf(file, "Table id:%d\n", pmt.Table_id)
+	fmt.Fprintf(file, "Section_syntax_indicator:%d\n", pmt.Section_syntax_indicator)
+	fmt.Fprintf(file, "Section_length:%d\n", pmt.Section_length)
+	fmt.Fprintf(file, "Program_number:%d\n", pmt.Program_number)
+	fmt.Fprintf(file, "Version_number:%d\n", pmt.Version_number)
+	fmt.Fprintf(file, "Current_next_indicator:%d\n", pmt.Current_next_indicator)
+	fmt.Fprintf(file, "Section_number:%d\n", pmt.Section_number)
+	fmt.Fprintf(file, "Last_section_number:%d\n", pmt.Last_section_number)
+	fmt.Fprintf(file, "PCR_PID:%d\n", pmt.PCR_PID)
+	fmt.Fprintf(file, "program_info_length:%d\n", pmt.Program_info_length)
 	for i, stream := range pmt.Streams {
-		file.WriteString(fmt.Sprintf("----stream %d\n", i))
+		fmt.Fprintf(file, "----stream %d\n", i)
 		if stream.StreamType == uint8(TS_STREAM_AAC) {
 			file.WriteString("    stream_type:AAC\n")
 		} else if stream.StreamType == uint8(TS_STREAM_AUDIO_MPEG1) {
@@ -592,10 +592,10 @@ func (pmt *Pmt) PrettyPrint(file *os.File) {
 		} else if stream.StreamType == uint8(TS_STREAM_H265) {
 			file.WriteString("    stream_type:H265\n")
 		} else {
-			file.WriteString(fmt.Sprintf("    stream_type:UnSupport streamtype:%d\n", stream.StreamType))
+			fmt.Fprintf(file, "    stream_type:UnSupport streamtype:%d\n", stream.StreamType)
 		}
-		file.WriteString(fmt.Sprintf("    elementary_PID:%d\n", stream.Elementary_PID))
-		file.WriteString(fmt.Sprintf("    ES_info_length:%d\n", stream.ES_Info_Length))
+		fmt.Fprintf(file, "    elementary_PID:%d\n", stream.Elementary_PID)
+		fmt.Fprintf(file, "    ES_info_length:%d\n", stream.ES_Info_Length)
 	}
 }
 

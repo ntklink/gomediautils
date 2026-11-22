@@ -173,11 +173,12 @@ func OpusPacketDuration(packet []byte) uint64 {
 	code := packet[0] & 0x03
 	frameCount := 0
 	var duration uint64
-	if code == 0 {
+	switch code {
+	case 0:
 		frameCount = 1
-	} else if code == 1 || code == 2 {
+	case 1, 2:
 		frameCount = 2
-	} else {
+	default:
 		if len(packet) < 2 {
 			return 0
 		}
@@ -420,7 +421,8 @@ func (ctx *OpusContext) ParseExtranData(extraData []byte) error {
 	ctx.MapType = extraData[18]
 	var channel []byte
 	var order ChannelOrder
-	if ctx.MapType == 0 {
+	switch ctx.MapType {
+	case 0:
 		if ctx.ChannelCount < 1 || ctx.ChannelCount > 2 {
 			return errors.New("channel mapping family 0 only supports 1 or 2 channels")
 		}
@@ -428,7 +430,7 @@ func (ctx *OpusContext) ParseExtranData(extraData []byte) error {
 		ctx.StereoStreamCount = ctx.ChannelCount - 1
 		channel = []byte{0, 1}
 		order = defalutOrder
-	} else if ctx.MapType == 1 || ctx.MapType == 2 || ctx.MapType == 255 {
+	case 1, 2, 255:
 		if len(extraData) < 21+ctx.ChannelCount {
 			return errors.New("opus extradata too short for channel mapping table")
 		}
@@ -443,7 +445,7 @@ func (ctx *OpusContext) ParseExtranData(extraData []byte) error {
 		} else {
 			order = defalutOrder
 		}
-	} else {
+	default:
 		return errors.New("unsupport map type")
 	}
 	if len(channel) > 0 {

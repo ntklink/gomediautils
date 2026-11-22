@@ -65,14 +65,14 @@ func Playlist(streamName string, segments []segment) string {
 	}
 
 	m3u.WriteString("#EXTM3U\n")
-	m3u.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", maxDuration))
+	fmt.Fprintf(m3u, "#EXT-X-TARGETDURATION:%d\n", maxDuration)
 	m3u.WriteString("#EXT-X-VERSION:3\n")
 	m3u.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	m3u.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
 	for i, seg := range segments {
-		m3u.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", seg.duration()))
-		m3u.WriteString(fmt.Sprintf("%s/sequence-%d.ts?start=%d&end=%d\n",
-			streamName, i, seg.start, seg.end))
+		fmt.Fprintf(m3u, "#EXTINF:%.3f,\n", seg.duration())
+		fmt.Fprintf(m3u, "%s/sequence-%d.ts?start=%d&end=%d\n",
+			streamName, i, seg.start, seg.end)
 	}
 	m3u.WriteString("#EXT-X-ENDLIST\n")
 	return m3u.String()
@@ -196,7 +196,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	if strings.HasSuffix(path, ".m3u8") {
-		s.servePlaylist(w, r, strings.TrimSuffix(path, ".m3u8"))
+		s.servePlaylist(w, strings.TrimSuffix(path, ".m3u8"))
 		return
 	}
 	// <stream>/sequence-N.ts?start=..&end=..
@@ -208,7 +208,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.serveSegment(w, r, stream)
 }
 
-func (s *Server) servePlaylist(w http.ResponseWriter, r *http.Request, stream string) {
+func (s *Server) servePlaylist(w http.ResponseWriter, stream string) {
 	body, err := PlaylistFor(s.mp4Path(stream), stream, s.segmentSeconds())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)

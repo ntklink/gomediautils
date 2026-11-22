@@ -260,11 +260,12 @@ func DecodeMp3Head(data []byte) (*MP3FrameHead, error) {
 		return nil, errors.New("mp3 free bitrate is not supported")
 	}
 
-	if head.Layer == LAYER_1 {
+	switch head.Layer {
+	case LAYER_1:
 		head.SampleSize = 384
-	} else if head.Layer == LAYER_2 {
+	case LAYER_2:
 		head.SampleSize = 1152
-	} else {
+	default:
 		if head.Version == VERSION_MPEG_1 {
 			head.SampleSize = 1152
 		} else {

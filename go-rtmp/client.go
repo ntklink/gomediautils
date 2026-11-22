@@ -254,11 +254,12 @@ func (cli *RtmpClient) Input(data []byte) error {
 }
 
 func (cli *RtmpClient) WriteFrame(cid codec.CodecID, frame []byte, pts, dts uint32) error {
-	if cid == codec.CODECID_AUDIO_AAC || cid == codec.CODECID_AUDIO_G711A || cid == codec.CODECID_AUDIO_G711U {
+	switch cid {
+	case codec.CODECID_AUDIO_AAC, codec.CODECID_AUDIO_G711A, codec.CODECID_AUDIO_G711U:
 		return cli.WriteAudio(cid, frame, pts, dts)
-	} else if cid == codec.CODECID_VIDEO_H264 || cid == codec.CODECID_VIDEO_H265 {
+	case codec.CODECID_VIDEO_H264, codec.CODECID_VIDEO_H265:
 		return cli.WriteVideo(cid, frame, pts, dts)
-	} else {
+	default:
 		return errors.New("unsupport codec id")
 	}
 }
@@ -502,7 +503,7 @@ func (cli *RtmpClient) handleConnectResponse(data []byte) error {
 	if !cli.isPublish {
 		ack := makeAcknowledgementSize(cli.wndAckSize)
 		batch.write(cli.userCtrlChan, ack, nil, WND_ACK_SIZE, 0, 0)
-		cmd, err := makeCreateStream(cli.streamName, 2)
+		cmd, err := makeCreateStream(2)
 		batch.write(cli.cmdChan, cmd, err, Command_AMF0, 0, 0)
 		return cli.sendBatch(batch)
 	}
@@ -515,7 +516,7 @@ func (cli *RtmpClient) handleConnectResponse(data []byte) error {
 	batch.write(cli.cmdChan, buf, err, Command_AMF0, 0, 0)
 	buf, err = makeFcPublish(cli.streamName)
 	batch.write(cli.cmdChan, buf, err, Command_AMF0, 0, 0)
-	buf, err = makeCreateStream(cli.streamName, 2)
+	buf, err = makeCreateStream(2)
 	batch.write(cli.cmdChan, buf, err, Command_AMF0, 0, 0)
 	return cli.sendBatch(batch)
 }
@@ -562,9 +563,10 @@ func (cli *RtmpClient) handleError(data []byte) error {
 	}
 	for _, obj := range objs {
 		for _, item := range obj.items {
-			if item.name == "code" {
+			switch item.name {
+			case "code":
 				code = amf0String(item.value)
-			} else if item.name == "description" {
+			case "description":
 				describe = amf0String(item.value)
 			}
 		}
@@ -592,12 +594,13 @@ func (cli *RtmpClient) handleStatus(data []byte) error {
 	}
 	for _, obj := range objs {
 		for _, item := range obj.items {
-			if item.name == "code" {
+			switch item.name {
+			case "code":
 				foundInfoObj = true
 				code = amf0String(item.value)
-			} else if item.name == "level" {
+			case "level":
 				level = amf0String(item.value)
-			} else if item.name == "description" {
+			case "description":
 				describe = amf0String(item.value)
 			}
 		}

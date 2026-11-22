@@ -256,11 +256,12 @@ func (server *RtmpServerHandle) Input(data []byte) error {
 }
 
 func (server *RtmpServerHandle) WriteFrame(cid codec.CodecID, frame []byte, pts, dts uint32) error {
-	if cid == codec.CODECID_AUDIO_AAC || cid == codec.CODECID_AUDIO_G711A || cid == codec.CODECID_AUDIO_G711U {
+	switch cid {
+	case codec.CODECID_AUDIO_AAC, codec.CODECID_AUDIO_G711A, codec.CODECID_AUDIO_G711U:
 		return server.WriteAudio(cid, frame, pts, dts)
-	} else if cid == codec.CODECID_VIDEO_H264 || cid == codec.CODECID_VIDEO_H265 {
+	case codec.CODECID_VIDEO_H264, codec.CODECID_VIDEO_H265:
 		return server.WriteVideo(cid, frame, pts, dts)
-	} else {
+	default:
 		return errors.New("unsupport codec id")
 	}
 }
@@ -429,9 +430,10 @@ func (server *RtmpServerHandle) handleConnect(data []byte) error {
 	}
 	if len(objs) > 0 {
 		for _, item := range objs[0].items {
-			if item.name == "app" {
+			switch item.name {
+			case "app":
 				server.app = amf0String(item.value)
-			} else if item.name == "tcUrl" {
+			case "tcUrl":
 				server.tcUrl = amf0String(item.value)
 			}
 		}
