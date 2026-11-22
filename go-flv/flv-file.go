@@ -106,10 +106,15 @@ func (f *FlvReader) Input(data []byte) (err error) {
 			if len(buf) < 9 {
 				goto end
 			}
-			if err = f.readFlvHeader(buf[:9]); err != nil {
+			var dataOffset uint32
+			dataOffset, err = f.readFlvHeader(buf[:9])
+			if err != nil {
 				goto end
 			}
-			buf = buf[9:]
+			if uint64(len(buf)) < uint64(dataOffset) {
+				goto end
+			}
+			buf = buf[dataOffset:]
 			f.state = FLV_PARSER_TAG_SIZE
 		case FLV_PARSER_TAG_SIZE:
 			if len(buf) < 4 {
@@ -241,8 +246,11 @@ func (f *FlvReader) createVideoTagDemuxer(cid FLV_VIDEO_CODEC_ID) error {
 			return
 		}
 		dts := uint32(f.flvTag.TimestampExtended)<<24 | f.flvTag.Timestamp
-		pts := dts + uint32(cts)
-		f.OnFrame(codecid, frame, pts, dts)
+		pts64 := int64(dts) + int64(cts)
+		if pts64 < 0 {
+			pts64 = 0
+		}
+		f.OnFrame(codecid, frame, uint32(pts64), dts)
 	})
 	return nil
 }
@@ -264,11 +272,15 @@ func (f *FlvReader) createAudioTagDemuxer(formats FLV_SOUND_FORMAT) error {
 	return nil
 }
 
-func (f *FlvReader) readFlvHeader(hdr []byte) error {
+func (f *FlvReader) readFlvHeader(hdr []byte) (uint32, error) {
 	if hdr[0] != 'F' || hdr[1] != 'L' || hdr[2] != 'V' {
-		return errors.New("this file Is Not FLV File")
+		return 0, errors.New("this file Is Not FLV File")
 	}
-	return nil
+	dataOffset := binary.BigEndian.Uint32(hdr[5:9])
+	if dataOffset < 9 {
+		return 0, errors.New("flv: header data offset < 9")
+	}
+	return dataOffset, nil
 }
 
 type FlvWriter struct {
@@ -397,6 +409,9 @@ func (f *FlvWriter) writeTags(frameType TagType, data []byte, pts uint32, dts ui
 	}
 	var hdr [FLVTAG_SIZE]byte
 	for _, tag := range tags {
+		if len(tag) > 0xFFFFFF {
+			return errTagTooLarge
+		}
 		ftag.DataSize = uint32(len(tag))
 		head := ftag.appendTo(hdr[:0])
 		if _, err := f.writer.Write(head); err != nil {

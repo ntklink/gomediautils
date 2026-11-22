@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ntklink/gomediautils/go-rtsp/sdp"
@@ -19,6 +20,7 @@ type RtspServer struct {
 	passwd      string
 	realm       string
 	auth        authenticate
+	outMu       sync.Mutex
 	output      OutPutCallBack
 	handle      ServerHandle
 	sessionId   string
@@ -112,15 +114,20 @@ func (server *RtspServer) AddTrack(track *RtspTrack) error {
 }
 
 func (server *RtspServer) SetOutput(output OutPutCallBack) {
+	server.outMu.Lock()
 	server.output = output
+	server.outMu.Unlock()
 }
 
 // sendToClient writes to the connection, or reports that no output is set.
 func (server *RtspServer) sendToClient(data []byte) error {
-	if server.output == nil {
+	server.outMu.Lock()
+	cb := server.output
+	server.outMu.Unlock()
+	if cb == nil {
 		return errors.New("rtsp: no output set on the server")
 	}
-	return server.output(data)
+	return cb(data)
 }
 
 func (server *RtspServer) Input(data []byte) (err error) {
@@ -156,10 +163,17 @@ func (server *RtspServer) Input(data []byte) (err error) {
 	if len(buf) == 0 {
 		server.buffer.Reset()
 	} else {
-		if server.buffer.Len() > 0 {
+		if len(buf) > maxRtspBufferSize {
 			server.buffer.Reset()
+			return errRtspBufferOverflow
 		}
-		server.buffer.Write(buf)
+		if server.buffer.Len() > 0 {
+			rem := append([]byte(nil), buf...)
+			server.buffer.Reset()
+			server.buffer.Write(rem)
+		} else {
+			server.buffer.Write(buf)
+		}
 	}
 	return nil
 }
@@ -419,9 +433,12 @@ func (server *RtspServer) handleUnAuth(request RtspRequest) error {
 func (server *RtspServer) sendRespones(req RtspRequest, res RtspResponse) error {
 	res.Fileds[CSeq] = req.Fileds[CSeq]
 	res.Fileds[Date] = time.Now().UTC().Format("02 Jan 06 15:04:05 GMT")
-	if server.output == nil {
+	server.outMu.Lock()
+	cb := server.output
+	server.outMu.Unlock()
+	if cb == nil {
 		// nothing is connected yet, dropping the response is not an error
 		return nil
 	}
-	return server.output([]byte(res.Encode()))
+	return cb([]byte(res.Encode()))
 }

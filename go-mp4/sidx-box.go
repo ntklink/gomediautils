@@ -59,7 +59,11 @@ func NewSegmentIndexBox() *SegmentIndexBox {
 // stored value once it is set, which made a second call (Encode after a
 // caller had set it) grow the box by another header and pad it with junk.
 func (sidx *SegmentIndexBox) Size() uint64 {
-	return uint64(sidxBoxSize(len(sidx.Entrys)))
+	size := uint64(sidxBoxSize(len(sidx.Entrys)))
+	if sidx.Box != nil && sidx.Box.Version == 0 {
+		size -= 8
+	}
+	return size
 }
 
 func (sidx *SegmentIndexBox) Decode(r io.Reader) (offset int, err error) {
@@ -147,7 +151,7 @@ func (sidx *SegmentIndexBox) Encode() (int, []byte) {
 		binary.BigEndian.PutUint32(boxdata[offset:], sidx.Entrys[i].SubsegmentDuration)
 		offset += 4
 		binary.BigEndian.PutUint32(boxdata[offset:], sidx.Entrys[i].SAPDeltaTime)
-		boxdata[offset] = (boxdata[offset] & 0xF0) + sidx.Entrys[i].StartsWithSAP<<7 | (sidx.Entrys[i].SAPType&0x07)<<4
+		boxdata[offset] = (boxdata[offset] & 0x0F) | (sidx.Entrys[i].StartsWithSAP << 7) | ((sidx.Entrys[i].SAPType & 0x07) << 4)
 		offset += 4
 	}
 	return offset, boxdata

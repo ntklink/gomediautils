@@ -24,6 +24,7 @@ const reorderWindow = 16
 // by shift() to keep them representable.
 type dtsReorder struct {
 	pending  []*queued
+	head     int
 	pts      ptsHeap
 	emitted  int
 	measured bool
@@ -41,13 +42,13 @@ func newDtsReorder() *dtsReorder {
 func (r *dtsReorder) push(q *queued) {
 	r.pending = append(r.pending, q)
 	heap.Push(&r.pts, q.pkt.Pts)
-	if len(r.pending) >= reorderWindow {
+	if len(r.pending)-r.head >= reorderWindow {
 		r.resolveOldest()
 	}
 }
 
 func (r *dtsReorder) flush() {
-	for len(r.pending) > 0 {
+	for r.head < len(r.pending) {
 		r.resolveOldest()
 	}
 }
@@ -64,7 +65,8 @@ func (r *dtsReorder) shift() uint64 {
 // measure finds the reordering depth and frame spacing of the frames
 // pending so far. It runs once, on the first window.
 func (r *dtsReorder) measure() {
-	n := len(r.pending)
+	pending := r.pending[r.head:]
+	n := len(pending)
 	if r.measured || n == 0 {
 		return
 	}
@@ -74,24 +76,33 @@ func (r *dtsReorder) measure() {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool {
-		return r.pending[order[a]].pkt.Pts < r.pending[order[b]].pkt.Pts
+		return pending[order[a]].pkt.Pts < pending[order[b]].pkt.Pts
 	})
 	for rank, i := range order {
 		// a frame decoded later than its place in presentation order needs
 		// that many frames of head start
 		r.delay = max(r.delay, i-rank)
 	}
-	r.minPts = int64(r.pending[order[0]].pkt.Pts)
+	r.minPts = int64(pending[order[0]].pkt.Pts)
 	if n > 1 {
-		r.step = (int64(r.pending[order[n-1]].pkt.Pts) - r.minPts) / int64(n-1)
+		r.step = (int64(pending[order[n-1]].pkt.Pts) - r.minPts) / int64(n-1)
 	}
 }
 
 func (r *dtsReorder) resolveOldest() {
 	r.measure()
-	q := r.pending[0]
-	r.pending[0] = nil
-	r.pending = r.pending[1:]
+	q := r.pending[r.head]
+	r.pending[r.head] = nil
+	r.head++
+	if r.head == len(r.pending) {
+		r.pending = r.pending[:0]
+		r.head = 0
+	} else if r.head >= reorderWindow && r.head*2 >= len(r.pending) {
+		n := copy(r.pending, r.pending[r.head:])
+		clear(r.pending[n:])
+		r.pending = r.pending[:n]
+		r.head = 0
+	}
 
 	var dts int64
 	if r.emitted < r.delay {

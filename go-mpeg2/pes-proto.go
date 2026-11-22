@@ -205,6 +205,9 @@ func (pkg *PesPacket) Decode(bs *codec.BitStream) error {
 		bs.SkipBits(1)
 		pkg.Pts = (pkg.Pts << 15) | bs.GetBits(15)
 		bs.SkipBits(1)
+	} else {
+		pkg.Pts = 0
+		pkg.Dts = 0
 	}
 	if pkg.PTS_DTS_flags&0x03 == 0x03 {
 		bs.SkipBits(4)
@@ -307,6 +310,7 @@ func (pkg *PesPacket) DecodeMpeg1(bs *codec.BitStream) error {
 	}
 	switch {
 	case bs.NextBits(4) == 0x02:
+		pkg.PTS_DTS_flags = 0x02
 		bs.SkipBits(4)
 		pkg.Pts = bs.GetBits(3)
 		bs.SkipBits(1)
@@ -316,6 +320,7 @@ func (pkg *PesPacket) DecodeMpeg1(bs *codec.BitStream) error {
 		bs.SkipBits(1)
 		pkg.Dts = pkg.Pts
 	case bs.NextBits(4) == 0x03:
+		pkg.PTS_DTS_flags = 0x03
 		bs.SkipBits(4)
 		pkg.Pts = bs.GetBits(3)
 		bs.SkipBits(1)
@@ -331,6 +336,9 @@ func (pkg *PesPacket) DecodeMpeg1(bs *codec.BitStream) error {
 		pkg.Dts = pkg.Dts<<15 | bs.GetBits(15)
 		bs.SkipBits(1)
 	case bs.NextBits(8) == 0x0F:
+		pkg.PTS_DTS_flags = 0
+		pkg.Pts = 0
+		pkg.Dts = 0
 		bs.SkipBits(8)
 	default:
 		if bs.Err() != nil {
@@ -411,6 +419,8 @@ func (pkg *PesPacket) Encode(bsw *codec.BitStreamWriter) {
 		bsw.PutUint64(pkg.ESCR_base>>15, 15)
 		bsw.PutUint8(0x01, 1)
 		bsw.PutUint64(pkg.ESCR_base, 15)
+		bsw.PutUint8(0x01, 1)
+		bsw.PutUint16(pkg.ESCR_extension, 9)
 		bsw.PutUint8(0x01, 1)
 	}
 	bsw.PutBytes(pkg.Pes_payload)

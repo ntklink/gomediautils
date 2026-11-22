@@ -3,6 +3,7 @@ package mp4
 import (
 	"encoding/binary"
 	"io"
+	"math"
 	"time"
 
 	"github.com/ntklink/gomediautils/go-codec"
@@ -160,5 +161,11 @@ func decodeMdhdBox(demuxer *MovDemuxer) (err error) {
 		return errNoTrack
 	}
 	track.timescale = mdhd.Timescale
+	track.mdhdDuration = mdhd.Duration
+	if mdhd.Duration > math.MaxUint32 {
+		track.duration = math.MaxUint32
+	} else {
+		track.duration = uint32(mdhd.Duration)
+	}
 	return err
 }

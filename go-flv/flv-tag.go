@@ -110,15 +110,23 @@ type VideoTag struct {
 }
 
 func (vtag VideoTag) Encode() (tag []byte) {
+	return vtag.appendTo(make([]byte, 0, vtag.encodedSize()))
+}
+
+func (vtag VideoTag) encodedSize() int {
 	if vtag.CodecId == uint8(FLV_AVC) {
-		tag = make([]byte, 5)
-		tag[1] = vtag.AVCPacketType
-		PutUint24(tag[2:], uint32(vtag.CompositionTime))
-	} else {
-		tag = make([]byte, 1)
+		return 5
 	}
-	tag[0] = (vtag.FrameType << 4) | (vtag.CodecId & 0x0F)
-	return
+	return 1
+}
+
+func (vtag VideoTag) appendTo(dst []byte) []byte {
+	dst = append(dst, (vtag.FrameType<<4)|(vtag.CodecId&0x0F))
+	if vtag.CodecId == uint8(FLV_AVC) {
+		cts := uint32(vtag.CompositionTime)
+		dst = append(dst, vtag.AVCPacketType, byte(cts>>16), byte(cts>>8), byte(cts))
+	}
+	return dst
 }
 
 // hevcFourCC identifies hevc in an enhanced video tag header.
@@ -136,17 +144,26 @@ var hevcFourCC = [4]byte{'h', 'v', 'c', '1'}
 //	byte 1..4: FourCC
 //	byte 5..7: composition time, only for PacketTypeCodedFrames
 func (vtag VideoTag) EncodeEx(fourCC [4]byte) (tag []byte) {
-	size := 5
+	return vtag.appendExTo(make([]byte, 0, vtag.encodedExSize()), fourCC)
+}
+
+func (vtag VideoTag) encodedExSize() int {
 	if vtag.AVCPacketType == PacketTypeCodedFrames {
-		size = 8
+		return 8
 	}
-	tag = make([]byte, size)
-	tag[0] = 0x80 | ((vtag.FrameType & 0x07) << 4) | (vtag.AVCPacketType & 0x0F)
-	copy(tag[1:5], fourCC[:])
-	if size == 8 {
-		PutUint24(tag[5:], uint32(vtag.CompositionTime))
+	return 5
+}
+
+func (vtag VideoTag) appendExTo(dst []byte, fourCC [4]byte) []byte {
+	dst = append(dst,
+		0x80|((vtag.FrameType&0x07)<<4)|(vtag.AVCPacketType&0x0F),
+		fourCC[0], fourCC[1], fourCC[2], fourCC[3],
+	)
+	if vtag.AVCPacketType == PacketTypeCodedFrames {
+		cts := uint32(vtag.CompositionTime)
+		dst = append(dst, byte(cts>>16), byte(cts>>8), byte(cts))
 	}
-	return
+	return dst
 }
 
 // Decode reads a video tag header. Every field is only read when data is long
@@ -240,14 +257,22 @@ type AudioTag struct {
 }
 
 func (atag AudioTag) Encode() (tag []byte) {
+	return atag.appendTo(make([]byte, 0, atag.encodedSize()))
+}
+
+func (atag AudioTag) encodedSize() int {
 	if atag.SoundFormat == 10 {
-		tag = make([]byte, 2)
-		tag[1] = atag.AACPacketType
-	} else {
-		tag = make([]byte, 1)
+		return 2
 	}
-	tag[0] = atag.SoundFormat<<4 | atag.SoundRate<<2 | atag.SoundSize<<1 | atag.SoundType
-	return
+	return 1
+}
+
+func (atag AudioTag) appendTo(dst []byte) []byte {
+	dst = append(dst, atag.SoundFormat<<4|atag.SoundRate<<2|atag.SoundSize<<1|atag.SoundType)
+	if atag.SoundFormat == 10 {
+		dst = append(dst, atag.AACPacketType)
+	}
+	return dst
 }
 
 func (atag *AudioTag) Decode(data []byte) error {

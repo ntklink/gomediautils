@@ -3,6 +3,7 @@ package rtsp
 import (
 	"bytes"
 	"errors"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -86,13 +87,13 @@ func hasRecordAbility(capset []string) bool {
 
 const (
 	Accept            = "Accept"
-	AcceptEncoding    = "AcceptEncoding"
-	AcceptLanguage    = "AcceptLanguage"
+	AcceptEncoding    = "Accept-Encoding"
+	AcceptLanguage    = "Accept-Language"
 	Allow             = "Allow"
 	Authorization     = "Authorization"
 	Bandwidth         = "Bandwidth"
 	Blocksize         = "Blocksize"
-	CacheControl      = "CacheControl"
+	CacheControl      = "Cache-Control"
 	Conference        = "Conference"
 	Connection        = "Connection"
 	ContentBase       = "Content-Base"
@@ -105,27 +106,53 @@ const (
 	Date              = "Date"
 	Expires           = "Expires"
 	From              = "From"
-	IfModifiedSince   = "IfModifiedSince"
-	LastModified      = "LastModified"
-	ProxyAuthenticate = "ProxyAuthenticate"
-	ProxyRequire      = "ProxyRequire"
+	IfModifiedSince   = "If-Modified-Since"
+	LastModified      = "Last-Modified"
+	ProxyAuthenticate = "Proxy-Authenticate"
+	ProxyRequire      = "Proxy-Require"
 	Public            = "Public"
 	Range             = "Range"
 	Referer           = "Referer"
 	Require           = "Require"
-	RetryAfter        = "RetryAfter"
-	RTPInfo           = "RTPInfo"
+	RetryAfter        = "Retry-After"
+	RTPInfo           = "RTP-Info"
 	Scale             = "Scale"
 	Session           = "Session"
 	Server            = "Server"
 	Speed             = "Speed"
 	Transport         = "Transport"
 	Unsupported       = "Unsupported"
-	UserAgent         = "UserAgent"
+	UserAgent         = "User-Agent"
 	Via               = "Via"
 	WWWAuthenticate   = "WWW-Authenticate"
 	Location          = "Location"
 )
+
+var canonicalRtspHeaders = map[string]string{
+	"cseq":             CSeq,
+	"www-authenticate": WWWAuthenticate,
+	"rtp-info":         RTPInfo,
+	"content-base":     ContentBase,
+	"content-encoding": ContentEncoding,
+	"content-language": ContentLanguage,
+	"content-length":   ContentLength,
+	"content-location": ContentLocation,
+	"content-type":     ContentType,
+	"user-agent":       UserAgent,
+	"cache-control":    CacheControl,
+}
+
+func canonicalHeaderKey(k string) string {
+	k = strings.TrimSpace(k)
+	if canon, ok := canonicalRtspHeaders[strings.ToLower(k)]; ok {
+		return canon
+	}
+	return textproto.CanonicalMIMEHeaderKey(k)
+}
+
+const maxRtspBufferSize = 1 << 20
+
+var errRtspBufferOverflow = errors.New("rtsp: message buffer exceeded maximum size")
 
 const (
 	OK                    = 200
@@ -202,7 +229,7 @@ func (req *RtspRequest) parseBytes(raw []byte) (int, error) {
 			// header line without ':' , ignore it
 			continue
 		}
-		k := strings.Title(strings.TrimSpace(kv[0]))
+		k := canonicalHeaderKey(kv[0])
 		v := strings.TrimSpace(kv[1])
 		req.Fileds[k] = v
 	}
@@ -386,7 +413,7 @@ func (res *RtspResponse) parseBytes(raw []byte) (int, error) {
 		if len(kv) < 2 {
 			continue
 		}
-		k := strings.Title(strings.TrimSpace(kv[0]))
+		k := canonicalHeaderKey(kv[0])
 		v := strings.TrimSpace(kv[1])
 		res.Fileds[k] = v
 	}

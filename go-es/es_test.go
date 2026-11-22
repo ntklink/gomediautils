@@ -53,7 +53,9 @@ func TestOrderer(t *testing.T) {
 			if tc.periods != nil {
 				period = tc.periods[i]
 			}
-			got = append(got, o.push(&Frame{}, orderKey{period: period, poc: poc})...)
+			if f, ok := o.push(&Frame{}, orderKey{period: period, poc: poc}); ok {
+				got = append(got, f)
+			}
 		}
 		got = append(got, o.flush()...)
 		if o.delay != tc.wantDelay {

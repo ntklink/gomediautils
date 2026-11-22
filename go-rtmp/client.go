@@ -356,7 +356,10 @@ func (cli *RtmpClient) handleMessage(msg *rtmpMessage) error {
 		}
 		cli.reader.chunkSize = size
 	case ABORT_MESSAGE:
-		//TODO
+		if len(msg.msg) < 4 {
+			return errors.New("bytes of \"abort message\" < 4")
+		}
+		cli.reader.abort(binary.BigEndian.Uint32(msg.msg))
 	case ACKNOWLEDGEMENT:
 		// peer acknowledges bytes we sent, nothing to do
 	case USER_CONTROL:
@@ -403,7 +406,7 @@ func (cli *RtmpClient) handleUserEvent(data []byte) error {
 
 func (cli *RtmpClient) handleCommandRes(data []byte) error {
 	item := amf0Item{}
-	l, err := item.decode(data)
+	l, err := item.decode(data, 0)
 	if err != nil {
 		return err
 	}

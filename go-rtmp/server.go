@@ -344,7 +344,10 @@ func (server *RtmpServerHandle) handleMessage(msg *rtmpMessage) error {
 		}
 		server.reader.chunkSize = size
 	case ABORT_MESSAGE:
-		//TODO
+		if len(msg.msg) < 4 {
+			return errors.New("bytes of \"abort message\" < 4")
+		}
+		server.reader.abort(binary.BigEndian.Uint32(msg.msg))
 	case ACKNOWLEDGEMENT:
 		// peer acknowledges bytes we sent, nothing to do
 	case USER_CONTROL:
@@ -391,7 +394,7 @@ func (server *RtmpServerHandle) handleUserEvent(data []byte) error {
 
 func (server *RtmpServerHandle) handleCommand(data []byte) error {
 	item := amf0Item{}
-	l, err := item.decode(data)
+	l, err := item.decode(data, 0)
 	if err != nil {
 		return err
 	}

@@ -151,7 +151,7 @@ func (ps_pkg_hdr *PSPackHeader) decodeMpeg2(bs *codec.BitStream) error {
 	bs.SkipBits(5)
 	ps_pkg_hdr.Pack_stuffing_length = bs.Uint8(3)
 	if bs.RemainBytes() < int(ps_pkg_hdr.Pack_stuffing_length) {
-		bs.UnRead(10 * 8)
+		bs.UnRead(14 * 8)
 		return errNeedMore
 	}
 	bs.SkipBits(int(ps_pkg_hdr.Pack_stuffing_length) * 8)
@@ -404,6 +404,7 @@ func (psm *Program_stream_map) PrettyPrint(file *os.File) {
 }
 
 func (psm *Program_stream_map) Encode(bsw *codec.BitStreamWriter) {
+	start := bsw.ByteOffset()
 	bsw.PutBytes([]byte{0x00, 0x00, 0x01, 0xBC})
 	loc := bsw.ByteOffset()
 	bsw.PutUint16(psm.Program_stream_map_length, 16)
@@ -423,10 +424,10 @@ func (psm *Program_stream_map) Encode(bsw *codec.BitStreamWriter) {
 	}
 	length := bsw.DistanceFromMarkDot()/8 + 4
 	bsw.SetUint16(uint16(length), loc)
-	crc := codec.CalcCrc32(0xffffffff, bsw.Bits()[bsw.ByteOffset()-int(length-4)-4:bsw.ByteOffset()])
-	tmpcrc := make([]byte, 4)
-	binary.LittleEndian.PutUint32(tmpcrc, crc)
-	bsw.PutBytes(tmpcrc)
+	crc := codec.CalcCrc32(0xffffffff, bsw.Bits()[start:bsw.ByteOffset()])
+	var tmpcrc [4]byte
+	binary.LittleEndian.PutUint32(tmpcrc[:], crc)
+	bsw.PutBytes(tmpcrc[:])
 }
 
 func (psm *Program_stream_map) Decode(bs *codec.BitStream) error {

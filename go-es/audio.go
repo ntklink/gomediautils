@@ -59,7 +59,7 @@ func (a *aacReader) ReadFrame() (*Frame, error) {
 			return nil, err
 		}
 		if head[0] == 0xFF && head[1]&0xF6 == 0xF0 {
-			hdr := codec.NewAdtsFrameHeader()
+			var hdr codec.ADTS_Frame_Header
 			if hdr.Decode(head) == nil {
 				size := int(hdr.Variable_Header.Frame_length)
 				rate := codec.AACSampleIdxToSample(int(hdr.Fix_Header.Sampling_frequency_index))
@@ -189,7 +189,7 @@ func (g *g711Reader) Codec() codec.CodecID {
 
 func (g *g711Reader) ReadFrame() (*Frame, error) {
 	channels := uint64(g.opts.channels)
-	samples := uint64(g.opts.sampleRate) * uint64(g.opts.frameDurationMs) / 1000
+	samples := max(uint64(g.opts.sampleRate)*uint64(g.opts.frameDurationMs)/1000, 1)
 	frame := make([]byte, samples*channels)
 	n, err := io.ReadFull(g.r, frame)
 	if n == 0 {

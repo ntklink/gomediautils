@@ -5,6 +5,10 @@ import (
 	"errors"
 )
 
+const maxRtpFrameBufferSize = 16 << 20
+
+var errFrameBufferOverflow = errors.New("rtp: frame buffer exceeded maximum size")
+
 type RTP_HOOK_FUNC func(pkg *RtpPacket)
 type ON_RTP_PKT_FUNC func(pkt []byte) error
 
@@ -76,12 +80,13 @@ func (pkg *RtpPacket) Decode(data []byte) error {
 		if len(data) < 4 {
 			return errors.New("rtp extension need 4 bytes at least")
 		}
-		length := binary.BigEndian.Uint16(data[2:])
-		if len(data)-4 < int(length)*4 {
+		length := int(binary.BigEndian.Uint16(data[2:]))
+		extLen := 4 + 4*length
+		if len(data) < extLen {
 			return errors.New("rtp extension need more bytes")
 		}
-		pkg.Extensions = data[:4+4*length]
-		data = data[4+4*length:]
+		pkg.Extensions = data[:extLen]
+		data = data[extLen:]
 	}
 	if pkg.Header.PaddingFlag > 0 {
 		if len(data) == 0 || int(data[len(data)-1]) > len(data) {

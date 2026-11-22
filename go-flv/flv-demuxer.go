@@ -213,6 +213,9 @@ func (demuxer *HevcTagDemuxer) Decode(data []byte) error {
 			return errEnhancedTooSmal
 		}
 		vtag.Decode(data)
+		if vtag.CodecId != uint8(FLV_HEVC) {
+			return fmt.Errorf("%w: %d", ErrUnsupportedVideoCodec, vtag.CodecId)
+		}
 		switch vtag.AVCPacketType {
 		case PacketTypeSequenceStart:
 			return demuxer.decodeSequenceHeader(data[5:])
@@ -225,6 +228,9 @@ func (demuxer *HevcTagDemuxer) Decode(data []byte) error {
 	}
 
 	vtag.Decode(data[0:5])
+	if vtag.CodecId != uint8(FLV_HEVC) {
+		return fmt.Errorf("%w: %d", ErrUnsupportedVideoCodec, vtag.CodecId)
+	}
 	data = data[5:]
 	switch vtag.AVCPacketType {
 	case AVC_SEQUENCE_HEADER:
@@ -327,9 +333,11 @@ func (demuxer *AACTagDemuxer) Decode(data []byte) error {
 		if err != nil {
 			return err
 		}
-		adts_frame := append(adts.Encode(), data...)
+		adtsFrame := make([]byte, 7+len(data))
+		copy(adtsFrame[:7], adts.Encode())
+		copy(adtsFrame[7:], data)
 		if demuxer.onframe != nil {
-			demuxer.onframe(codec.CODECID_AUDIO_AAC, adts_frame)
+			demuxer.onframe(codec.CODECID_AUDIO_AAC, adtsFrame)
 		}
 	}
 	return nil

@@ -93,6 +93,9 @@ func (ctx *RtcpContext) GenerateSDES(sdesType uint8, txt string) *SourceDescript
 	sdes.Chunks = make([]SDESChunk, 1)
 	sdes.Chunks[0].SSRC = ctx.ssrc
 	sdes.Chunks[0].Item = &ChunkItem{}
+	if len(txt) > 255 {
+		txt = txt[:255]
+	}
 	sdes.Chunks[0].Item.Length = uint8(len(txt))
 	sdes.Chunks[0].Item.Txt = []byte(txt)
 	sdes.Chunks[0].Item.Type = sdesType
@@ -157,7 +160,7 @@ func (ctx *RtcpContext) ReceivedRtp(pkt *rtp.RtpPacket) {
 		ctx.lastRtpTimestamp = pkt.Header.Timestamp
 		ctx.jitter = 0
 	} else {
-		D := int64((rtpClock-ctx.lastRtpClock)*uint64(ctx.sampleRate)/1000000) - (int64(pkt.Header.Timestamp - ctx.lastRtpTimestamp))
+		D := int64((rtpClock-ctx.lastRtpClock)*uint64(ctx.sampleRate)/1000000) - int64(int32(pkt.Header.Timestamp-ctx.lastRtpTimestamp))
 		if D < 0 {
 			D = -1 * D
 		}
@@ -229,9 +232,16 @@ func (ctx *RtcpContext) getReportBlock() ReportBlock {
 		fraction = 255
 	}
 
-	delay := time.Now().UnixNano()/1000 - int64(ctx.srClockTime)
-	lsr := ctx.srNtpLsr >> 8 & 0xFFFFFFFF
-	dlsr := uint32(float32(delay) / 1000000 * 65536)
+	var lsr uint64
+	var dlsr uint32
+	if ctx.srClockTime != 0 {
+		delay := time.Now().UnixNano()/1000 - int64(ctx.srClockTime)
+		if delay < 0 {
+			delay = 0
+		}
+		lsr = (ctx.srNtpLsr >> 16) & 0xFFFFFFFF
+		dlsr = uint32(float64(delay) / 1000000 * 65536)
+	}
 
 	rb.Lost = uint32(lost)
 	rb.Fraction = uint8(fraction)

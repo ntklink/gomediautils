@@ -254,7 +254,9 @@ func (m *Muxer) addPacket(p pendingPacket) error {
 		if err := m.flushPage(s, 0); err != nil {
 			return err
 		}
-		s.continued = true
+		if room > 0 {
+			s.continued = true
+		}
 	}
 	s.flushDue = len(s.body) >= pageTargetBytes || s.granule-s.pageStart >= pageTargetSamples
 	return nil

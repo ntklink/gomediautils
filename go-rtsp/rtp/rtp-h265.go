@@ -128,26 +128,43 @@ func (h265 *H265Packer) packFu(nalu []byte, timestamp uint32, last bool) error {
 		} else {
 			length = h265.mtu - RTP_FIX_HEAD_LEN - 3
 		}
-		pkg.Payload = make([]byte, length+3)
-		pkg.Payload[0] = payloadHdr[0]
-		pkg.Payload[1] = payloadHdr[1]
+		var raw []byte
+		var payload []byte
+		if h265.onPacket != nil {
+			raw = make([]byte, RTP_FIX_HEAD_LEN+length+3)
+			payload = raw[RTP_FIX_HEAD_LEN:]
+		} else {
+			payload = make([]byte, length+3)
+		}
+		payload[0] = payloadHdr[0]
+		payload[1] = payloadHdr[1]
 		// FU header always carries the FuType; S/E bits are OR-ed in
-		pkg.Payload[2] = fuHeader
+		payload[2] = fuHeader
 		if start {
-			pkg.Payload[2] |= 0x80
+			payload[2] |= 0x80
 			start = false
 		}
 		if end {
-			pkg.Payload[2] |= 0x40
+			payload[2] |= 0x40
 		}
-		copy(pkg.Payload[3:], nalu[:length])
+		copy(payload[3:], nalu[:length])
+		pkg.Payload = payload
 		nalu = nalu[length:]
 		h265.sequence++
 		if h265.onRtp != nil {
 			h265.onRtp(&pkg)
 		}
 		if h265.onPacket != nil {
-			if err := h265.onPacket(pkg.Encode()); err != nil {
+			var err error
+			if len(pkg.Header.CSRC) == 0 && len(pkg.Extensions) == 0 && len(pkg.Padding) == 0 &&
+				len(pkg.Payload) == len(raw)-RTP_FIX_HEAD_LEN &&
+				(len(pkg.Payload) == 0 || &pkg.Payload[0] == &raw[RTP_FIX_HEAD_LEN]) {
+				pkg.Header.encodeTo(raw[:RTP_FIX_HEAD_LEN])
+				err = h265.onPacket(raw)
+			} else {
+				err = h265.onPacket(pkg.Encode())
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -160,6 +177,7 @@ type H265UnPacker struct {
 	timestamp    uint32
 	lastSequence uint16
 	lost         bool
+	inFu         bool
 	frameBuffer  *bytes.Buffer
 }
 
@@ -192,6 +210,10 @@ func (unpacker *H265UnPacker) UnPack(pkt []byte) error {
 		if len(pkg.Payload) < 2 {
 			return errors.New("h265 nalu need 2 bytes at least")
 		}
+		if unpacker.inFu || unpacker.frameBuffer.Len() > 4 {
+			unpacker.frameBuffer.Truncate(4)
+			unpacker.inFu = false
+		}
 		unpacker.frameBuffer.Write(pkg.Payload)
 		if unpacker.onFrame != nil {
 			unpacker.onFrame(unpacker.frameBuffer.Bytes(), pkg.Header.Timestamp, false)
@@ -218,22 +240,33 @@ func (unpacker *H265UnPacker) unpackFu(pkt *RtpPacket) error {
 			}
 			unpacker.frameBuffer.Truncate(4)
 		}
+		unpacker.inFu = true
 		unpacker.timestamp = pkt.Header.Timestamp
 		unpacker.frameBuffer.WriteByte(pkt.Payload[0]&0x81 | ((pkt.Payload[2] & 0x3F) << 1))
 		unpacker.frameBuffer.WriteByte(pkt.Payload[1])
 		unpacker.lost = false
 	} else {
+		if !unpacker.inFu {
+			return nil
+		}
 		if unpacker.lastSequence+1 != pkt.Header.SequenceNumber {
 			unpacker.lost = true
 		}
 	}
 	unpacker.lastSequence = pkt.Header.SequenceNumber
+	if unpacker.frameBuffer.Len()+len(pkt.Payload[3:]) > maxRtpFrameBufferSize {
+		unpacker.frameBuffer.Truncate(4)
+		unpacker.inFu = false
+		unpacker.lost = true
+		return errFrameBufferOverflow
+	}
 	unpacker.frameBuffer.Write(pkt.Payload[3:])
 	if e > 0 {
 		if unpacker.onFrame != nil {
 			unpacker.onFrame(unpacker.frameBuffer.Bytes(), unpacker.timestamp, unpacker.lost)
 		}
 		unpacker.frameBuffer.Truncate(4)
+		unpacker.inFu = false
 	}
 	return nil
 }

@@ -371,26 +371,26 @@ func (c *Conn) Write(b []byte) (int, error) {
 			return off, err
 		}
 		now := time.Now()
-		p := packet{
-			seq:       c.nextSeq,
-			position:  positionSolo,
-			msgNo:     c.nextMsg,
-			timestamp: c.now32(),
-			dstSocket: c.peerSocketID,
-			payload:   append([]byte(nil), chunk...),
-		}
+		seq := c.nextSeq
+		raw := make([]byte, headerSize+len(chunk))
+		copy(raw[headerSize:], chunk)
+		var keyFlags byte
 		if c.crypto != nil {
-			p.keyFlags = 1
-			if err := c.crypto.xorPayload(1, p.seq, p.payload); err != nil {
+			keyFlags = 1
+			if err := c.crypto.xorPayload(1, seq, raw[headerSize:]); err != nil {
 				return off, err
 			}
 		}
-		raw := p.marshal()
+		binary.BigEndian.PutUint32(raw[0:], seq&seqMask)
+		w1 := uint32(positionSolo)<<30 | uint32(keyFlags&0x03)<<27 | c.nextMsg&0x03FFFFFF
+		binary.BigEndian.PutUint32(raw[4:], w1)
+		binary.BigEndian.PutUint32(raw[8:], c.now32())
+		binary.BigEndian.PutUint32(raw[12:], c.peerSocketID)
 		// the packet takes its sequence number whether or not the socket
 		// takes it: the send buffer must hold consecutive numbers for NAKs
 		// to find what to resend, and a packet that failed to go out is
 		// just a lost one to the receiver, which asks for it again
-		c.sndBuf = append(c.sndBuf, &sentPacket{seq: p.seq, raw: raw, size: len(chunk), sentAt: now})
+		c.sndBuf = append(c.sndBuf, &sentPacket{seq: seq, raw: raw, size: len(chunk), sentAt: now})
 		c.sndBytes += len(chunk)
 		if err := c.send(raw); err != nil {
 			c.stats.SendErrors++
@@ -474,8 +474,13 @@ func (c *Conn) releaseSent(n int) {
 	for _, sp := range c.sndBuf[:n] {
 		c.sndBytes -= sp.size
 	}
-	clear(c.sndBuf[:n])
-	c.sndBuf = c.sndBuf[n:]
+	if n == len(c.sndBuf) {
+		clear(c.sndBuf)
+		c.sndBuf = c.sndBuf[:0]
+	} else {
+		clear(c.sndBuf[:n])
+		c.sndBuf = c.sndBuf[n:]
+	}
 	c.wakeWriters()
 }
 
@@ -487,6 +492,12 @@ func (c *Conn) releaseSent(n int) {
 // what arrived is still read before io.EOF; once Close is called, Read
 // fails with net.ErrClosed at once and what was not read is dropped.
 func (c *Conn) Read(b []byte) (int, error) {
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for {
 		c.mu.Lock()
 		if c.closing {
@@ -502,7 +513,11 @@ func (c *Conn) Read(b []byte) (int, error) {
 				c.ready[0] = msg[n:]
 			} else {
 				c.ready[0] = nil
-				c.ready = c.ready[1:]
+				if len(c.ready) == 1 {
+					c.ready = c.ready[:0]
+				} else {
+					c.ready = c.ready[1:]
+				}
 			}
 			c.mu.Unlock()
 			return n, nil
@@ -524,9 +539,18 @@ func (c *Conn) Read(b []byte) (int, error) {
 			if d <= 0 {
 				return 0, os.ErrDeadlineExceeded
 			}
-			t := time.NewTimer(d)
-			defer t.Stop()
-			timeout = t.C
+			if timer == nil {
+				timer = time.NewTimer(d)
+			} else {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(d)
+			}
+			timeout = timer.C
 		}
 		select {
 		case <-c.readyNotify:
@@ -744,13 +768,13 @@ func (c *Conn) handleData(p *packet, now time.Time) {
 	if _, dup := c.rcvBuf[p.seq]; dup {
 		return
 	}
-	payload := append([]byte(nil), p.payload...)
 	// an encrypted connection takes encrypted packets only and a clear one
 	// clear packets only: libsrt encrypts every data packet once keys are
 	// agreed, so anything else is not from the peer
 	if (c.crypto != nil) != (p.keyFlags != 0) {
 		return
 	}
+	payload := append([]byte(nil), p.payload...)
 	if p.keyFlags != 0 && c.crypto.xorPayload(p.keyFlags, p.seq, payload) != nil {
 		return
 	}
@@ -876,9 +900,16 @@ func (c *Conn) skipRange(first, last uint32) {
 	if n < 0 || n > maxLossRange {
 		return
 	}
+	if seqDiff(c.rcvNext, first) > maxRecvWindow {
+		return
+	}
 	for s, i := first, int32(0); i <= n; s, i = seqNext(s), i+1 {
-		if seqDiff(c.rcvNext, s) < 0 {
+		d := seqDiff(c.rcvNext, s)
+		if d < 0 {
 			continue
+		}
+		if d > maxRecvWindow {
+			break
 		}
 		if _, ok := c.rcvBuf[s]; !ok {
 			c.rcvBuf[s] = &rcvPacket{skip: true}
@@ -958,7 +989,15 @@ func (c *Conn) handleACK(p *packet) {
 // packets no longer held.
 func (c *Conn) handleNAK(p *packet) {
 	var gone []uint32
+	var seen map[uint32]struct{}
 	decodeLossList(p.payload, func(seq uint32) {
+		if seen == nil {
+			seen = make(map[uint32]struct{})
+		}
+		if _, dup := seen[seq]; dup {
+			return
+		}
+		seen[seq] = struct{}{}
 		if len(c.sndBuf) == 0 {
 			gone = append(gone, seq)
 			return
@@ -970,9 +1009,9 @@ func (c *Conn) handleNAK(p *packet) {
 			}
 			return
 		}
-		raw := append([]byte(nil), c.sndBuf[i].raw...)
-		markRetransmitted(raw)
-		if c.send(raw) == nil {
+		sp := c.sndBuf[i]
+		markRetransmitted(sp.raw)
+		if c.send(sp.raw) == nil {
 			c.stats.PacketsRetransmitted++
 			c.lastSend = time.Now()
 		} else {
@@ -1021,9 +1060,8 @@ func (c *Conn) resendTail(now time.Time) {
 		if i >= 64 || now.Sub(sp.sentAt) < wait {
 			break
 		}
-		raw := append([]byte(nil), sp.raw...)
-		markRetransmitted(raw)
-		if c.send(raw) == nil {
+		markRetransmitted(sp.raw)
+		if c.send(sp.raw) == nil {
 			c.stats.PacketsRetransmitted++
 		} else {
 			c.stats.SendErrors++

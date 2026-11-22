@@ -30,7 +30,10 @@ type SgpdBox struct {
 }
 
 func decodeSgpdBox(demuxer *MovDemuxer, size uint32) (err error) {
-	track := demuxer.lastTrack()
+	track := demuxer.currentTrack
+	if track == nil {
+		track = demuxer.lastTrack()
+	}
 	if track == nil {
 		return errNoTrack
 	}
@@ -145,7 +148,7 @@ func DecodeSeigSampleGroupEntry(name string, length uint32, buf []byte) (interfa
 	n += 1
 
 	s.CryptByteBlock = byteTwo >> 4
-	s.SkipByteBlock = byteTwo % 0xf
+	s.SkipByteBlock = byteTwo & 0x0f
 
 	s.IsProtected = buf[n]
 	n += 1

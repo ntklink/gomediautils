@@ -46,13 +46,14 @@ func (fws *fmp4WriterSeeker) Write(p []byte) (n int, err error) {
 
 func (fws *fmp4WriterSeeker) Seek(offset int64, whence int) (int64, error) {
 	if whence == io.SeekCurrent {
-		if fws.offset+int(offset) > len(fws.buffer) {
+		target := int64(fws.offset) + offset
+		if target < 0 || target > int64(len(fws.buffer)) {
 			return -1, errors.New(fmt.Sprint("SeekCurrent out of range", len(fws.buffer), offset, fws.offset))
 		}
-		fws.offset += int(offset)
-		return int64(fws.offset), nil
+		fws.offset = int(target)
+		return target, nil
 	} else if whence == io.SeekStart {
-		if offset > int64(len(fws.buffer)) {
+		if offset < 0 || offset > int64(len(fws.buffer)) {
 			return -1, errors.New(fmt.Sprint("SeekStart out of range", len(fws.buffer), offset, fws.offset))
 		}
 		fws.offset = int(offset)

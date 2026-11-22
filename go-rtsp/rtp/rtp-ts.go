@@ -79,6 +79,11 @@ func (unpacker *TsUnPacker) UnPack(pkt []byte) error {
 
 	//first rtp packet
 	if unpacker.timestamp == -1 {
+		if len(pkg.Payload) > maxRtpFrameBufferSize {
+			unpacker.frameBuffer.Reset()
+			unpacker.lost = true
+			return errFrameBufferOverflow
+		}
 		unpacker.timestamp = int64(pkg.Header.Timestamp)
 		unpacker.lastSequence = pkg.Header.SequenceNumber
 		unpacker.lost = false
@@ -103,6 +108,11 @@ func (unpacker *TsUnPacker) UnPack(pkt []byte) error {
 	}
 	unpacker.timestamp = int64(pkg.Header.Timestamp)
 	unpacker.lastSequence = pkg.Header.SequenceNumber
+	if unpacker.frameBuffer.Len()+len(pkg.Payload) > maxRtpFrameBufferSize {
+		unpacker.frameBuffer.Reset()
+		unpacker.lost = true
+		return errFrameBufferOverflow
+	}
 	unpacker.frameBuffer.Write(pkg.Payload)
 	return nil
 }

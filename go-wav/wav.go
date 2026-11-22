@@ -79,6 +79,10 @@ func (f Format) validate() error {
 	if f.SampleRate > maxSampleRate || f.BitsPerSample > maxBits {
 		return fmt.Errorf("wav: %d Hz at %d bits is not a real format", f.SampleRate, f.BitsPerSample)
 	}
+	align := f.BlockAlign()
+	if align > 0xFFFF || uint64(f.SampleRate)*uint64(align) > 0xFFFFFFFF {
+		return fmt.Errorf("wav: %d channels at %d Hz / %d bits overflows WAVE header fields", f.Channels, f.SampleRate, f.BitsPerSample)
+	}
 	switch f.AudioFormat {
 	case FormatPCM, FormatIEEEFloat, FormatALaw, FormatMuLaw:
 		return nil
@@ -208,12 +212,13 @@ var extensibleSubFormat = []byte{0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00,
 // sample data and an es.Reader that hands the samples out in frames, 20 ms
 // by default.
 type Reader struct {
-	r       io.Reader
-	format  Format
-	remain  uint64 // bytes of sample data left, when the size is known
-	sized   bool
-	frameMs uint32
-	samples uint64
+	r          io.Reader
+	format     Format
+	totalBytes uint64 // total bytes of sample data, when the size is known
+	remain     uint64 // bytes of sample data left, when the size is known
+	sized      bool
+	frameMs    uint32
+	samples    uint64
 }
 
 // ReaderOption configures a Reader.
@@ -272,6 +277,7 @@ func NewReader(r io.Reader, options ...ReaderOption) (*Reader, error) {
 			// which is told apart by the RIFF size its writer filled in
 			riffSize := binary.LittleEndian.Uint32(riff[4:])
 			rd.sized = size != 0xFFFFFFFF && (size != 0 || (riffSize != 0 && riffSize != 0xFFFFFFFF))
+			rd.totalBytes = uint64(size)
 			rd.remain = uint64(size)
 			return rd, nil
 		default:
@@ -315,8 +321,8 @@ func (rd *Reader) Duration() uint64 {
 	if !rd.sized {
 		return 0
 	}
-	frames := rd.remain / uint64(rd.format.BlockAlign())
-	return (rd.samples + frames) * 1000 / uint64(rd.format.SampleRate)
+	frames := rd.totalBytes / uint64(rd.format.BlockAlign())
+	return frames * 1000 / uint64(rd.format.SampleRate)
 }
 
 // Read reads sample data. It implements io.Reader.

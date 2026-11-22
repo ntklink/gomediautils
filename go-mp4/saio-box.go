@@ -3,6 +3,7 @@ package mp4
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -76,6 +77,10 @@ func decodeSaioBox(demuxer *MovDemuxer, size uint32) error {
 		if saiz.DefaultSampleInfoSize == 0 && len(saiz.SampleInfo) < int(saiz.SampleCount) {
 			return errors.New("mp4: saiz sample info shorter than sample count")
 		}
+		ivSize := int(demuxer.currentTrack.defaultPerSampleIVSize)
+		if ivSize > 16 {
+			return fmt.Errorf("mp4: invalid defaultPerSampleIVSize %d", ivSize)
+		}
 		var currentOffset int64
 		currentOffset, err = demuxer.reader.Seek(0, io.SeekCurrent)
 		if err != nil {
@@ -94,16 +99,18 @@ func decodeSaioBox(demuxer *MovDemuxer, size uint32) error {
 				return err
 			}
 			var se sencEntry
-			se.iv = make([]byte, 16)
-			if err = checkRemain(buf, 0, 8); err != nil {
-				return err
+			if ivSize > 0 {
+				if err = checkRemain(buf, 0, ivSize); err != nil {
+					return err
+				}
+				se.iv = make([]byte, 16)
+				copy(se.iv, buf[:ivSize])
 			}
-			copy(se.iv, buf[:8])
-			if sampleSize == 8 {
+			if int(sampleSize) == ivSize {
 				demuxer.currentTrack.subSamples = append(demuxer.currentTrack.subSamples, se)
 				continue
 			}
-			n := 8
+			n := ivSize
 			if err = checkRemain(buf, n, 2); err != nil {
 				return err
 			}

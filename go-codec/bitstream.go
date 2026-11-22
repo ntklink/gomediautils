@@ -343,6 +343,9 @@ func (bsw *BitStreamWriter) DistanceFromMarkDot() int {
 }
 
 func (bsw *BitStreamWriter) PutByte(v byte) {
+	if bsw.err != nil {
+		return
+	}
 	bsw.expandSpace(8)
 	if bsw.bitsoffset == 0 {
 		bsw.bits[bsw.byteoffset] = v
@@ -350,7 +353,7 @@ func (bsw *BitStreamWriter) PutByte(v byte) {
 	} else {
 		bsw.bits[bsw.byteoffset] |= v >> byte(bsw.bitsoffset)
 		bsw.byteoffset++
-		bsw.bits[bsw.byteoffset] = v & bitMask[bsw.bitsoffset-1]
+		bsw.bits[bsw.byteoffset] = (v & bitMask[bsw.bitsoffset-1]) << byte(8-bsw.bitsoffset)
 	}
 }
 

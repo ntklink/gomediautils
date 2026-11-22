@@ -132,16 +132,9 @@ func (opus *opusDemuxer) packet(stream *oggStream, packet []byte) (frame []byte,
 	if opus.lastpts == ^uint64(0) {
 		opus.lastpts = 0
 	}
-	frame = packet
-	pts = opus.lastpts
-	dts = pts
 
-	if opus.granule != stream.currentPage.granulePos && !stream.currentPage.eos {
-		opus.lastpts = 0
+	if stream.currentPage.granulePos != ^uint64(0) && opus.granule != stream.currentPage.granulePos && !stream.currentPage.eos {
 		opus.granule = stream.currentPage.granulePos
-	}
-
-	if opus.lastpts == 0 {
 		var duration uint64
 		for _, seg := range stream.currentPage.packets {
 			if len(seg) == 0 {
@@ -158,6 +151,9 @@ func (opus *opusDemuxer) packet(stream *oggStream, packet []byte) (frame []byte,
 		}
 	}
 
+	frame = packet
+	pts = opus.lastpts
+	dts = pts
 	opus.lastpts += codec.OpusPacketDuration(packet)
 	return
 }
@@ -267,12 +263,18 @@ func (vp8 *vp8Demuxer) clockRate() uint64 {
 }
 
 func (vp8 *vp8Demuxer) gptopts(granulePos uint64) uint64 {
+	if granulePos == ^uint64(0) {
+		return 0
+	}
 	var invcnt uint64 = 0
 	if ((granulePos >> 30) & 3) == 0 {
 		invcnt = 1
 	}
-	pts := (granulePos >> 32) - invcnt
-	return pts
+	pts := granulePos >> 32
+	if pts < invcnt {
+		return 0
+	}
+	return pts - invcnt
 }
 
 func (vp8 *vp8Demuxer) extraData() []byte {

@@ -42,12 +42,12 @@ func newOrderer() *orderer {
 	return &orderer{}
 }
 
-func (o *orderer) push(f *Frame, key orderKey) []*orderedFrame {
+func (o *orderer) push(f *Frame, key orderKey) (*orderedFrame, bool) {
 	o.window = append(o.window, &orderedFrame{frame: f, key: key})
 	if len(o.window) <= lookahead {
-		return nil
+		return nil, false
 	}
-	return []*orderedFrame{o.resolve()}
+	return o.resolve(), true
 }
 
 func (o *orderer) flush() []*orderedFrame {
@@ -99,11 +99,14 @@ func (o *orderer) resolve() *orderedFrame {
 	// its decode time rather than shown before it is decoded
 	f.ptsIndex = max(o.rank(0)+o.delay, f.dtsIndex)
 
-	o.window[0] = nil
-	o.window = o.window[1:]
-	o.history = append(o.history, f.key)
-	if len(o.history) > lookahead {
-		o.history = o.history[1:]
+	copy(o.window, o.window[1:])
+	o.window[len(o.window)-1] = nil
+	o.window = o.window[:len(o.window)-1]
+	if len(o.history) >= lookahead {
+		copy(o.history, o.history[1:])
+		o.history[len(o.history)-1] = f.key
+	} else {
+		o.history = append(o.history, f.key)
 	}
 	o.emitted++
 	return f

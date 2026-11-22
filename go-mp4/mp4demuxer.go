@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"sort"
 
 	"github.com/ntklink/gomediautils/go-codec"
 )
@@ -72,8 +74,10 @@ type Mp4Info struct {
 }
 
 type MovDemuxer struct {
-	reader        io.ReadSeeker
-	mdatOffset    []uint64 //一个mp4文件可能存在多个mdatbox
+	reader         io.ReadSeeker
+	readerPos      int64
+	readerPosKnown bool
+	mdatOffset     []uint64 //一个mp4文件可能存在多个mdatbox
 	tracks        []*mp4track
 	readSampleIdx []uint32
 	mp4Info       Mp4Info
@@ -139,6 +143,7 @@ func (demuxer *MovDemuxer) remainingFileSize() (int64, int64, error) {
 }
 
 func (demuxer *MovDemuxer) ReadHead() ([]TrackInfo, error) {
+	demuxer.readerPosKnown = false
 	infos := make([]TrackInfo, 0, 2)
 	var err error
 readLoop:
@@ -156,6 +161,10 @@ readLoop:
 			if _, remain, err = demuxer.remainingFileSize(); err != nil {
 				break
 			}
+			if remain < 0 {
+				err = errors.New("mp4: read position past end of stream")
+				break
+			}
 			basebox.Size = uint64(remain) + uint64(hdrLen)
 		}
 		if basebox.Size < uint64(hdrLen) {
@@ -163,6 +172,10 @@ readLoop:
 			break
 		}
 		payloadLen := basebox.Size - uint64(hdrLen)
+		if payloadLen > math.MaxInt64 {
+			err = errors.New("mp4: box payload exceeds int64 range")
+			break
+		}
 		boxType := mov_tag(basebox.Type)
 		isMdat := boxType == mov_tag([4]byte{'m', 'd', 'a', 't'})
 		isMoov := boxType == mov_tag([4]byte{'m', 'o', 'o', 'v'})
@@ -196,7 +209,7 @@ readLoop:
 		case mov_tag([4]byte{'f', 't', 'y', 'p'}):
 			err = decodeFtypBox(demuxer, size32)
 		case mov_tag([4]byte{'f', 'r', 'e', 'e'}):
-			err = decodeFreeBox(demuxer, size32)
+			_, err = demuxer.reader.Seek(int64(payloadLen), io.SeekCurrent)
 		case mov_tag([4]byte{'m', 'd', 'a', 't'}):
 			var currentOffset int64
 			if currentOffset, err = demuxer.reader.Seek(0, io.SeekCurrent); err != nil {
@@ -209,7 +222,7 @@ readLoop:
 			if _, remain, err = demuxer.remainingFileSize(); err != nil {
 				break readLoop
 			}
-			if uint64(remain) < payloadLen {
+			if remain < 0 || uint64(remain) < payloadLen {
 				err = errors.New("incomplete mp4 file")
 				break readLoop
 			}
@@ -233,9 +246,14 @@ readLoop:
 		case mov_tag([4]byte{'s', 'm', 'h', 'd'}):
 			err = decodeSmhdBox(demuxer)
 		case mov_tag([4]byte{'h', 'm', 'h', 'd'}):
-			_, err = fullbox.Decode(demuxer.reader)
+			hmhd := HintMediaHeaderBox{Box: new(FullBox)}
+			if _, err = hmhd.Decode(demuxer.reader); err == nil && payloadLen > 20 {
+				_, err = demuxer.reader.Seek(int64(payloadLen-20), io.SeekCurrent)
+			}
 		case mov_tag([4]byte{'n', 'm', 'h', 'd'}):
-			_, err = fullbox.Decode(demuxer.reader)
+			if _, err = fullbox.Decode(demuxer.reader); err == nil && payloadLen > 4 {
+				_, err = demuxer.reader.Seek(int64(payloadLen-4), io.SeekCurrent)
+			}
 		case mov_tag([4]byte{'s', 't', 'b', 'l'}):
 			track.stbltable = new(movstbl)
 		case mov_tag([4]byte{'s', 't', 's', 'd'}):
@@ -386,7 +404,11 @@ func trackEndDts(track *mp4track) uint64 {
 	last := samples[len(samples)-1].dts
 	toMs := func(v uint64) uint64 { return v * 1000 / uint64(track.timescale) }
 
-	if end := uint64(track.duration); end > last {
+	end := track.mdhdDuration
+	if end == 0 {
+		end = uint64(track.duration)
+	}
+	if end > last {
 		return toMs(end)
 	}
 	delta := uint64(0)
@@ -469,16 +491,31 @@ func (demuxer *MovDemuxer) ReadPacket() (*AVPacket, error) {
 		if whichTrack == nil {
 			return nil, io.EOF
 		}
-		if _, err := demuxer.reader.Seek(int64(minTsSample.offset), io.SeekStart); err != nil {
-			return nil, err
+		target := int64(minTsSample.offset)
+		if !demuxer.readerPosKnown || demuxer.readerPos != target {
+			if _, err := demuxer.reader.Seek(target, io.SeekStart); err != nil {
+				demuxer.readerPosKnown = false
+				return nil, err
+			}
+			demuxer.readerPos = target
+			demuxer.readerPosKnown = true
 		}
 		if minTsSample.size > maxBoxPayloadSize {
 			return nil, fmt.Errorf("mp4: sample size %d exceeds limit", minTsSample.size)
 		}
-		sample := make([]byte, minTsSample.size)
+		var aacBuf []byte
+		var sample []byte
+		if whichTrack.cid == MP4_CODEC_AAC {
+			aacBuf = make([]byte, 7+minTsSample.size)
+			sample = aacBuf[7:]
+		} else {
+			sample = make([]byte, minTsSample.size)
+		}
 		if _, err := io.ReadFull(demuxer.reader, sample); err != nil {
+			demuxer.readerPosKnown = false
 			return nil, err
 		}
+		demuxer.readerPos += int64(len(sample))
 		demuxer.readSampleIdx[whichTracki]++
 		avpkg := &AVPacket{
 			Cid:     whichTrack.cid,
@@ -515,7 +552,8 @@ func (demuxer *MovDemuxer) ReadPacket() (*AVPacket, error) {
 			if err != nil {
 				return nil, err
 			}
-			avpkg.Data = append(adts.Encode(), sample...)
+			copy(aacBuf[:7], adts.Encode())
+			avpkg.Data = aacBuf
 		default:
 			avpkg.Data = sample
 		}
@@ -591,14 +629,10 @@ func (demuxer *MovDemuxer) SeekTime(dts uint64) error {
 		// the parameter sets carried over from before the seek no longer
 		// belong in front of the frames that follow it
 		track.paramSetCache = track.paramSetCache[:0]
-		idx := len(track.samplelist)
-		for j := 0; j < len(track.samplelist); j++ {
-			if track.samplelist[j].dts*1000/uint64(track.timescale) >= dts {
-				idx = j
-				break
-			}
-		}
-		if isVideo(track.cid) {
+		idx := sort.Search(len(track.samplelist), func(j int) bool {
+			return track.samplelist[j].dts*1000/uint64(track.timescale) >= dts
+		})
+		if isVideo(track.cid) && idx < len(track.samplelist) {
 			idx = track.syncSampleAtOrBefore(idx)
 		}
 		demuxer.readSampleIdx[i] = uint32(idx)
@@ -610,6 +644,9 @@ func (demuxer *MovDemuxer) buildSampleList() error {
 	cur, remain, err := demuxer.remainingFileSize()
 	if err != nil {
 		return err
+	}
+	if cur < 0 || remain < 0 {
+		return errors.New("mp4: invalid stream position")
 	}
 	fileSize := uint64(cur + remain)
 	for _, track := range demuxer.tracks {
@@ -705,7 +742,11 @@ func (demuxer *MovDemuxer) buildSampleList() error {
 					if iterator >= len(track.samplelist) {
 						break
 					}
-					track.samplelist[iterator].pts = uint64(int64(track.samplelist[iterator].dts) + offset)
+					pts := int64(track.samplelist[iterator].dts) + offset
+					if pts < 0 {
+						pts = 0
+					}
+					track.samplelist[iterator].pts = uint64(pts)
 					iterator++
 				}
 			}
@@ -772,7 +813,14 @@ func processH264(track *mp4track, avcc []byte, extra *h264ExtraData) []byte {
 		return out
 	}
 
-	out := make([]byte, 0)
+	totalLen := len(avcc)
+	for _, sps := range extra.spss {
+		totalLen += len(sps)
+	}
+	for _, pps := range extra.ppss {
+		totalLen += len(pps)
+	}
+	out := make([]byte, 0, totalLen)
 	for _, sps := range extra.spss {
 		out = append(out, sps...)
 	}

@@ -59,10 +59,14 @@ func (c *cryptoCtx) setKey(i int, sek []byte) error {
 	return nil
 }
 
+func deriveKEK(passphrase string, salt []byte, keyLen int) ([]byte, error) {
+	return pbkdf2.Key(sha1.New, passphrase, salt[kmSaltLen-8:], kekIteration, keyLen)
+}
+
 // kek derives the key encrypting key from the passphrase and the low 64
 // bits of the salt, as libsrt does.
 func (c *cryptoCtx) kek() ([]byte, error) {
-	return pbkdf2.Key(sha1.New, c.passphrase, c.salt[kmSaltLen-8:], kekIteration, c.keyLen)
+	return deriveKEK(c.passphrase, c.salt, c.keyLen)
 }
 
 // marshalKM builds the KM message announcing the even key.
@@ -105,9 +109,8 @@ func (c *cryptoCtx) applyKM(b []byte) error {
 	if len(b) < 16+saltLen+n*keyLen+8 {
 		return errBadKM
 	}
-	c.salt = append([]byte(nil), b[16:16+saltLen]...)
-	c.keyLen = keyLen
-	kek, err := c.kek()
+	salt := append([]byte(nil), b[16:16+saltLen]...)
+	kek, err := deriveKEK(c.passphrase, salt, keyLen)
 	if err != nil {
 		return err
 	}
@@ -115,17 +118,41 @@ func (c *cryptoCtx) applyKM(b []byte) error {
 	if err != nil {
 		return errBadSecret
 	}
+	var b0, b1 cipher.Block
+	var r0, r1 []byte
 	switch kk {
 	case 1:
-		return c.setKey(0, keys)
-	case 2:
-		return c.setKey(1, keys)
-	default:
-		if err := c.setKey(0, keys[:keyLen]); err != nil {
+		b0, err = aes.NewCipher(keys)
+		if err != nil {
 			return err
 		}
-		return c.setKey(1, keys[keyLen:])
+		r0 = keys
+	case 2:
+		b1, err = aes.NewCipher(keys)
+		if err != nil {
+			return err
+		}
+		r1 = keys
+	default:
+		b0, err = aes.NewCipher(keys[:keyLen])
+		if err != nil {
+			return err
+		}
+		b1, err = aes.NewCipher(keys[keyLen:])
+		if err != nil {
+			return err
+		}
+		r0, r1 = keys[:keyLen], keys[keyLen:]
 	}
+	c.salt = salt
+	c.keyLen = keyLen
+	if b0 != nil {
+		c.keys[0], c.raw[0] = b0, r0
+	}
+	if b1 != nil {
+		c.keys[1], c.raw[1] = b1, r1
+	}
+	return nil
 }
 
 // xorPayload encrypts or decrypts a data packet payload in place: AES-CTR

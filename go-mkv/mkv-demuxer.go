@@ -103,7 +103,8 @@ type Demuxer struct {
 	inCluster  bool
 	clusterTs  uint64
 
-	queue []*queued
+	queue     []*queued
+	queueHead int
 	// offset moves every timestamp of the file forward so that the decode
 	// times derived for b frames never fall below zero
 	offset      uint64
@@ -202,6 +203,7 @@ func (d *Demuxer) readPayload(h *elementHeader) ([]byte, error) {
 		return nil, fmt.Errorf("%w: element 0x%X of %d bytes", errTooLarge, h.id, h.size)
 	}
 	var buf bytes.Buffer
+	buf.Grow(int(min(h.size, 64*1024)))
 	n, err := io.CopyN(&buf, d.r, int64(h.size))
 	d.pos += n
 	if err != nil {
@@ -623,19 +625,28 @@ func (d *Demuxer) ReadPacket() (*Packet, error) {
 		}
 	}
 	for {
-		if !d.offsetKnown && (d.eof || len(d.queue) >= maxOffsetWait || d.reorderMeasured()) {
+		if !d.offsetKnown && (d.eof || len(d.queue)-d.queueHead >= maxOffsetWait || d.reorderMeasured()) {
 			d.settleOffset()
 		}
-		if d.offsetKnown && len(d.queue) > 0 && d.queue[0].resolved {
-			q := d.queue[0]
-			d.queue[0] = nil
-			d.queue = d.queue[1:]
+		if d.offsetKnown && d.queueHead < len(d.queue) && d.queue[d.queueHead].resolved {
+			q := d.queue[d.queueHead]
+			d.queue[d.queueHead] = nil
+			d.queueHead++
+			if d.queueHead == len(d.queue) {
+				d.queue = d.queue[:0]
+				d.queueHead = 0
+			} else if d.queueHead >= 64 && d.queueHead*2 >= len(d.queue) {
+				n := copy(d.queue, d.queue[d.queueHead:])
+				clear(d.queue[n:])
+				d.queue = d.queue[:n]
+				d.queueHead = 0
+			}
 			q.pkt.Pts += d.offset
 			q.pkt.Dts = uint64(max(q.dts+int64(d.offset), 0))
 			return q.pkt, nil
 		}
 		if d.eof {
-			if len(d.queue) > 0 {
+			if d.queueHead < len(d.queue) {
 				// every reorder buffer was flushed at the end
 				return nil, errors.New("mkv: unresolved frame left in the queue")
 			}
@@ -862,9 +873,8 @@ func (t *demuxTrack) output(frame []byte, key *bool, simple bool) ([]byte, error
 	switch t.info.Cid {
 	case codec.CODECID_VIDEO_H264, codec.CODECID_VIDEO_H265:
 		h265 := t.info.Cid == codec.CODECID_VIDEO_H265
-		if !simple && !*key {
-			// a BlockGroup without references is a key frame; trust the
-			// slices over a missing ReferenceBlock
+		if !simple {
+			// in a BlockGroup, trust the slices over ReferenceBlock presence
 			*key = isKeyAccessUnit(frame, t.nalLen, h265)
 		}
 		annexb, err := lengthPrefixedToAnnexB(frame, t.nalLen)

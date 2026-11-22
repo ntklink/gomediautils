@@ -2,14 +2,13 @@ package rtsp
 
 import (
 	"crypto/md5"
+	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
-	"time"
 )
 
 type authenticate interface {
@@ -30,7 +29,7 @@ func createAuthByAuthenticate(auth string) (authenticate, error) {
 	if strings.HasPrefix(strings.ToLower(auth), "basic") {
 		return &basicAuth{}, nil
 	} else if strings.HasPrefix(strings.ToLower(auth), "digest") {
-		return &digestAuth{nonceCounter: 0}, nil
+		return &digestAuth{}, nil
 	}
 	return nil, errors.New("unsupport Authorization scheme: " + auth)
 }
@@ -43,7 +42,7 @@ type basicAuth struct {
 
 func (basic *basicAuth) setUri(uri string)       {}
 func (basic *basicAuth) setMethod(method string) {}
-func (basic *basicAuth) setRealm(realm string)   {}
+func (basic *basicAuth) setRealm(realm string)   { basic.realm = realm }
 
 // decode accepts any basic challenge: the credentials do not depend on it.
 func (basic *basicAuth) decode(challenge string) error { return nil }
@@ -64,11 +63,7 @@ func (basic *basicAuth) check(authorization string) bool {
 	}
 	response := strings.TrimSpace(parts[1])
 	dst := base64.StdEncoding.EncodeToString([]byte(basic.userName + ":" + basic.passwd))
-	if response == dst {
-		return true
-	} else {
-		return false
-	}
+	return subtle.ConstantTimeCompare([]byte(response), []byte(dst)) == 1
 }
 
 func (basic *basicAuth) wwwAuthenticate() string {
@@ -76,13 +71,12 @@ func (basic *basicAuth) wwwAuthenticate() string {
 }
 
 type digestAuth struct {
-	userName     string
-	passwd       string
-	realm        string
-	nonce        string
-	uri          string
-	method       string
-	nonceCounter int32
+	userName string
+	passwd   string
+	realm    string
+	nonce    string
+	uri      string
+	method   string
 }
 
 func (digest *digestAuth) setUri(url string) {
@@ -102,14 +96,11 @@ func (digest *digestAuth) setRealm(realm string) {
 }
 
 func (digest *digestAuth) createNonce() string {
-	atomic.AddInt32(&digest.nonceCounter, 1)
-	t := time.Now().UnixNano()
-
-	data := make([]byte, 12)
-	binary.BigEndian.PutUint32(data, uint32(digest.nonceCounter))
-	binary.BigEndian.PutUint64(data[4:], uint64(t))
-	result := md5.Sum(data)
-	digest.nonce = hex.EncodeToString(result[:])
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("rtsp: crypto/rand failed: " + err.Error())
+	}
+	digest.nonce = hex.EncodeToString(b[:])
 	return digest.nonce
 }
 
@@ -154,8 +145,12 @@ func (digest *digestAuth) authenticateInfo() string {
 }
 
 func (digest *digestAuth) makeResponse() string {
+	return digest.makeResponseForUri(digest.uri)
+}
+
+func (digest *digestAuth) makeResponseForUri(uri string) string {
 	str1 := digest.userName + ":" + digest.realm + ":" + digest.passwd
-	str2 := digest.method + ":" + digest.uri
+	str2 := digest.method + ":" + uri
 	md5Bytes1 := md5.Sum([]byte(str1))
 	md5Bytes2 := md5.Sum([]byte(str2))
 	md5str1 := fmt.Sprintf("%x", md5Bytes1)
@@ -166,38 +161,57 @@ func (digest *digestAuth) makeResponse() string {
 }
 
 func (digest *digestAuth) check(authorization string) bool {
+	if digest.nonce == "" {
+		return false
+	}
 	parts := strings.SplitN(strings.TrimSpace(authorization), " ", 2)
 	if len(parts) < 2 || parts[0] != "Digest" {
 		return false
 	}
 	digestField := strings.TrimSpace(parts[1])
 	response := ""
+	clientUri := ""
+	hasUser := false
+	hasNonce := false
+	hasResponse := false
 	items := strings.Split(digestField, ",")
 	for _, item := range items {
 		kv := strings.SplitN(strings.TrimSpace(item), "=", 2)
 		if len(kv) < 2 {
 			continue
 		}
-		v := strings.Trim(kv[1], "\"")
-		switch kv[0] {
+		k := strings.TrimSpace(kv[0])
+		v := strings.Trim(strings.TrimSpace(kv[1]), "\"")
+		switch k {
 		case "username":
-			if v != digest.userName {
+			hasUser = true
+			if subtle.ConstantTimeCompare([]byte(v), []byte(digest.userName)) != 1 {
 				return false
 			}
 		case "realm":
 		case "nonce":
-			if digest.nonce != v {
+			hasNonce = true
+			if subtle.ConstantTimeCompare([]byte(v), []byte(digest.nonce)) != 1 {
 				return false
 			}
 		case "uri":
-			digest.uri = v
+			clientUri = v
 		case "response":
+			hasResponse = true
 			response = v
 		}
 	}
-	if response == digest.makeResponse() {
-		return true
-	} else {
+	if !hasUser || !hasNonce || !hasResponse {
 		return false
 	}
+	uri := digest.uri
+	if uri != "" {
+		if clientUri != "" && clientUri != uri {
+			return false
+		}
+	} else {
+		uri = clientUri
+	}
+	expected := digest.makeResponseForUri(uri)
+	return subtle.ConstantTimeCompare([]byte(response), []byte(expected)) == 1
 }

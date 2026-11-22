@@ -162,7 +162,7 @@ var (
 	//  48000 / 1000ms * 10 = 480 ...
 	SLKOpusSampleSize    [4]int = [4]int{480, 960, 1920, 2880}
 	HybridOpusSampleSize [4]int = [4]int{480, 960}
-	CELTOpusSampleSize   [4]int = [4]int{120, 210, 480, 960}
+	CELTOpusSampleSize   [4]int = [4]int{120, 240, 480, 960}
 )
 
 func OpusPacketDuration(packet []byte) uint64 {

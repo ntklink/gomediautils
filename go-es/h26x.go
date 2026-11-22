@@ -14,54 +14,110 @@ const maxNaluSize = 64 << 20
 
 // nalScanner cuts an Annex-B stream into nal units, without start codes.
 type nalScanner struct {
-	r   *bufio.Reader
-	buf []byte
-	eof bool
+	r       *bufio.Reader
+	buf     []byte
+	pos     int  // start of unread bytes in buf
+	scanPos int  // next offset in buf[pos:] to scan for start code
+	found   bool // whether a start code has been found in buf[pos:]
+	bodyOff int  // offset from pos to the start of the current NALU body
+	eof     bool
 }
+
+const nalReadChunkSize = 64 * 1024
 
 func newNalScanner(r io.Reader) *nalScanner {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
-		br = bufio.NewReaderSize(r, 64*1024)
+		br = bufio.NewReaderSize(r, nalReadChunkSize)
 	}
-	return &nalScanner{r: br}
+	return &nalScanner{r: br, buf: make([]byte, 0, nalReadChunkSize)}
+}
+
+func (s *nalScanner) fill() error {
+	if s.pos > 0 {
+		if s.pos == len(s.buf) {
+			s.buf = s.buf[:0]
+			s.pos = 0
+		} else if cap(s.buf)-len(s.buf) < nalReadChunkSize {
+			n := copy(s.buf, s.buf[s.pos:])
+			s.buf = s.buf[:n]
+			s.pos = 0
+		}
+	}
+	if cap(s.buf)-len(s.buf) < nalReadChunkSize {
+		newCap := max(cap(s.buf)*2, len(s.buf)+nalReadChunkSize)
+		grown := make([]byte, len(s.buf), newCap)
+		copy(grown, s.buf)
+		s.buf = grown
+	}
+	n, err := s.r.Read(s.buf[len(s.buf):cap(s.buf)])
+	s.buf = s.buf[:len(s.buf)+n]
+	if err == io.EOF {
+		s.eof = true
+		return nil
+	}
+	return err
 }
 
 // next returns the next nal unit, or io.EOF once the stream is used up.
 func (s *nalScanner) next() ([]byte, error) {
 	for {
-		start, sc := codec.FindStartCode(s.buf, 0)
-		if start >= 0 {
-			body := start + int(sc)
-			end, _ := codec.FindStartCode(s.buf, body)
+		data := s.buf[s.pos:]
+		if !s.found {
+			start, sc := codec.FindStartCode(data, s.scanPos)
+			if start >= 0 {
+				s.found = true
+				s.bodyOff = start + int(sc)
+				s.scanPos = s.bodyOff
+			} else {
+				if s.eof {
+					s.buf = s.buf[:0]
+					s.pos = 0
+					s.scanPos = 0
+					return nil, io.EOF
+				}
+				if len(data) > 3 {
+					s.scanPos = len(data) - 3
+				} else {
+					s.scanPos = 0
+				}
+			}
+		}
+		if s.found {
+			end, _ := codec.FindStartCode(data, s.scanPos)
 			if end >= 0 {
-				nalu := trimTrailingZeros(s.buf[body:end])
-				s.buf = s.buf[end:]
+				nalu := trimTrailingZeros(data[s.bodyOff:end])
+				s.pos += end
+				s.found = false
+				s.bodyOff = 0
+				s.scanPos = 0
 				if len(nalu) > 0 {
 					return append([]byte(nil), nalu...), nil
 				}
 				continue
 			}
 			if s.eof {
-				nalu := trimTrailingZeros(s.buf[body:])
-				s.buf = nil
+				nalu := trimTrailingZeros(data[s.bodyOff:])
+				s.buf = s.buf[:0]
+				s.pos = 0
+				s.found = false
+				s.bodyOff = 0
+				s.scanPos = 0
 				if len(nalu) > 0 {
-					return nalu, nil
+					return append([]byte(nil), nalu...), nil
 				}
 				return nil, io.EOF
 			}
-		} else if s.eof {
-			return nil, io.EOF
+			if len(data)-3 > s.bodyOff {
+				s.scanPos = len(data) - 3
+			} else {
+				s.scanPos = s.bodyOff
+			}
 		}
-		if len(s.buf) > maxNaluSize {
+		if len(data) > maxNaluSize {
 			return nil, errNaluTooLarge
 		}
-		chunk := make([]byte, 64*1024)
-		n, err := s.r.Read(chunk)
-		s.buf = append(s.buf, chunk[:n]...)
-		if err == io.EOF {
-			s.eof = true
-		} else if err != nil {
+		if err := s.fill(); err != nil {
 			return nil, err
 		}
 	}
@@ -154,6 +210,9 @@ func (v *videoReader) ReadFrame() (*Frame, error) {
 	f := v.out[0]
 	v.out[0] = nil
 	v.out = v.out[1:]
+	if len(v.out) == 0 {
+		v.out = v.out[:0]
+	}
 	return f, nil
 }
 
@@ -211,10 +270,12 @@ func (v *videoReader) finishAU() {
 	f := &Frame{Cid: v.cid, Data: v.au, KeyFrame: pic.key}
 	v.au = nil
 	v.auVCL = false
-	v.emit(v.order.push(f, orderKey{period: v.period, poc: poc}))
+	if of, ok := v.order.push(f, orderKey{period: v.period, poc: poc}); ok {
+		v.emitOne(of)
+	}
 }
 
-func (v *videoReader) emit(frames []*orderedFrame) {
+func (v *videoReader) emitOne(of *orderedFrame) {
 	fps := v.opts.frameRate
 	if fps <= 0 {
 		fps = v.parser.frameRate()
@@ -222,10 +283,14 @@ func (v *videoReader) emit(frames []*orderedFrame) {
 	if fps <= 0 {
 		fps = 25
 	}
+	of.frame.Dts = uint64(float64(of.dtsIndex) * 1000 / fps)
+	of.frame.Pts = uint64(float64(of.ptsIndex) * 1000 / fps)
+	v.out = append(v.out, of.frame)
+}
+
+func (v *videoReader) emit(frames []*orderedFrame) {
 	for _, of := range frames {
-		of.frame.Dts = uint64(float64(of.dtsIndex) * 1000 / fps)
-		of.frame.Pts = uint64(float64(of.ptsIndex) * 1000 / fps)
-		v.out = append(v.out, of.frame)
+		v.emitOne(of)
 	}
 }
 

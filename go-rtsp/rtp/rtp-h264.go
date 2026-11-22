@@ -172,46 +172,56 @@ func (pack *H264Packer) packFuA(nalu []byte, timestamp uint32, last bool) (err e
 	var fuIndicator byte = nalu[0]&0xE0 | 0x1c
 	var fuHeader byte = nalu[0]&0x1F | 0x80
 	nalu = nalu[1:]
+	maxPayload := pack.mtu - RTP_FIX_HEAD_LEN - 2
 	for {
 		pkg := RtpPacket{}
 		pkg.Header.PayloadType = pack.pt
 		pkg.Header.SSRC = pack.ssrc
 		pkg.Header.SequenceNumber = pack.sequence
 		pkg.Header.Timestamp = timestamp
-		if len(nalu)+RTP_FIX_HEAD_LEN+2 <= pack.mtu {
+		isEnd := len(nalu) <= maxPayload
+		chunkLen := maxPayload
+		if isEnd {
+			chunkLen = len(nalu)
 			if last {
 				pkg.Header.Marker = 1
 			}
 			fuHeader |= 0x40
-			pkg.Payload = make([]byte, 0, 2+len(nalu))
-			pkg.Payload = append(pkg.Payload, fuIndicator)
-			pkg.Payload = append(pkg.Payload, fuHeader)
-			pkg.Payload = append(pkg.Payload, nalu...)
-			if pack.onRtp != nil {
-				pack.onRtp(&pkg)
-			}
-			if pack.onPacket != nil {
-				err = pack.onPacket(pkg.Encode())
-			}
-			pack.sequence++
-			return
 		}
-		pkg.Payload = make([]byte, 0, 2+pack.mtu)
-		pkg.Payload = append(pkg.Payload, fuIndicator)
-		pkg.Payload = append(pkg.Payload, fuHeader)
+		var raw []byte
+		if pack.onPacket != nil {
+			raw = make([]byte, RTP_FIX_HEAD_LEN+2+chunkLen)
+			payload := raw[RTP_FIX_HEAD_LEN:]
+			payload[0] = fuIndicator
+			payload[1] = fuHeader
+			copy(payload[2:], nalu[:chunkLen])
+			pkg.Payload = payload
+		} else {
+			payload := make([]byte, 2+chunkLen)
+			payload[0] = fuIndicator
+			payload[1] = fuHeader
+			copy(payload[2:], nalu[:chunkLen])
+			pkg.Payload = payload
+		}
 		if fuHeader&0x80 > 0 {
 			fuHeader &= 0x7F
 		}
-		pkg.Payload = append(pkg.Payload, nalu[:pack.mtu-2-RTP_FIX_HEAD_LEN]...)
-		nalu = nalu[pack.mtu-2-RTP_FIX_HEAD_LEN:]
+		nalu = nalu[chunkLen:]
 		if pack.onRtp != nil {
 			pack.onRtp(&pkg)
 		}
 		if pack.onPacket != nil {
-			err = pack.onPacket(pkg.Encode())
+			if len(pkg.Header.CSRC) == 0 && len(pkg.Extensions) == 0 && len(pkg.Padding) == 0 &&
+				len(pkg.Payload) == len(raw)-RTP_FIX_HEAD_LEN &&
+				(len(pkg.Payload) == 0 || &pkg.Payload[0] == &raw[RTP_FIX_HEAD_LEN]) {
+				pkg.Header.encodeTo(raw[:RTP_FIX_HEAD_LEN])
+				err = pack.onPacket(raw)
+			} else {
+				err = pack.onPacket(pkg.Encode())
+			}
 		}
 		pack.sequence++
-		if err != nil {
+		if isEnd || err != nil {
 			return
 		}
 	}
@@ -280,6 +290,7 @@ type H264UnPacker struct {
 	timestamp    uint32
 	lastSequence uint16
 	lost         bool
+	inFu         bool
 	frameBuffer  *bytes.Buffer
 }
 
@@ -309,12 +320,20 @@ func (unpacker *H264UnPacker) UnPack(pkt []byte) error {
 	packType := pkg.Payload[0] & 0x1f
 	switch {
 	case 0 < packType && packType < 24:
+		if unpacker.inFu || unpacker.frameBuffer.Len() > 4 {
+			unpacker.frameBuffer.Truncate(4)
+			unpacker.inFu = false
+		}
 		unpacker.frameBuffer.Write(pkg.Payload)
 		if unpacker.onFrame != nil {
 			unpacker.onFrame(unpacker.frameBuffer.Bytes(), pkg.Header.Timestamp, false)
 		}
 		unpacker.frameBuffer.Truncate(4)
 	case packType == 24:
+		if unpacker.inFu || unpacker.frameBuffer.Len() > 4 {
+			unpacker.frameBuffer.Truncate(4)
+			unpacker.inFu = false
+		}
 		return unpacker.unpackStapa(pkg)
 	case packType == 25:
 		fallthrough
@@ -345,21 +364,32 @@ func (unpacker *H264UnPacker) unpackFuA(pkt *RtpPacket) error {
 			}
 			unpacker.frameBuffer.Truncate(4)
 		}
+		unpacker.inFu = true
 		unpacker.timestamp = pkt.Header.Timestamp
 		unpacker.frameBuffer.WriteByte((pkt.Payload[0] & 0xE0) | (pkt.Payload[1] & 0x1F))
 		unpacker.lost = false
 	} else {
+		if !unpacker.inFu {
+			return nil
+		}
 		if unpacker.lastSequence+1 != pkt.Header.SequenceNumber {
 			unpacker.lost = true
 		}
 	}
 	unpacker.lastSequence = pkt.Header.SequenceNumber
+	if unpacker.frameBuffer.Len()+len(pkt.Payload[2:]) > maxRtpFrameBufferSize {
+		unpacker.frameBuffer.Truncate(4)
+		unpacker.inFu = false
+		unpacker.lost = true
+		return errFrameBufferOverflow
+	}
 	unpacker.frameBuffer.Write(pkt.Payload[2:])
 	if e > 0 {
 		if unpacker.onFrame != nil {
 			unpacker.onFrame(unpacker.frameBuffer.Bytes(), unpacker.timestamp, unpacker.lost)
 		}
 		unpacker.frameBuffer.Truncate(4)
+		unpacker.inFu = false
 	}
 	return nil
 }

@@ -171,6 +171,7 @@ func decodeTfhdBox(demuxer *MovDemuxer, size uint32) error {
 	if err != nil {
 		return err
 	}
+	demuxer.currentTrack = nil
 	for i := 0; i < len(demuxer.tracks); i++ {
 		if demuxer.tracks[i].trackId != tfhd.Track_ID {
 			continue
@@ -179,6 +180,7 @@ func decodeTfhdBox(demuxer *MovDemuxer, size uint32) error {
 		demuxer.tracks[i].defaultDuration = tfhd.DefaultSampleDuration
 		demuxer.tracks[i].defaultSize = tfhd.DefaultSampleSize
 		demuxer.tracks[i].baseDataOffset = tfhd.BaseDataOffset
+		break
 	}
 	return err
 }

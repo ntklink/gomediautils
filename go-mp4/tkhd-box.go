@@ -119,10 +119,10 @@ func (tkhd *TrackHeaderBox) Decode(r io.Reader) (offset int, err error) {
 }
 
 func (tkhd *TrackHeaderBox) Encode() (int, []byte) {
-	tkhd.Box.Box.Size = tkhd.Size()
 	if tkhd.Duration > 0xFFFFFFFF {
 		tkhd.Box.Version = 1
 	}
+	tkhd.Box.Box.Size = tkhd.Size()
 	offset, buf := tkhd.Box.Encode()
 	if tkhd.Box.Version == 1 {
 		binary.BigEndian.PutUint64(buf[offset:], tkhd.Creation_time)
@@ -169,7 +169,7 @@ func makeTkhdBox(track *mp4track, duration uint32) []byte {
 	// Track_in_movie: Indicates that the track is used in the presentation. Flag value is 0x000002.
 	// Track_in_preview: Indicates that the track is used when previewing the presentation. Flag value is 0x000004.
 	tkhd.Box.Flags[2] = 0x03 //Track_enabled | Track_in_movie
-	if track.cid == MP4_CODEC_AAC || track.cid == MP4_CODEC_G711A || track.cid == MP4_CODEC_G711U || track.cid == MP4_CODEC_OPUS {
+	if isAudio(track.cid) {
 		tkhd.Volume = 0x0100
 	} else {
 		tkhd.Width = track.width << 16
@@ -188,7 +188,6 @@ func decodeTkhdBox(demuxer *MovDemuxer) (err error) {
 	if track == nil {
 		return errNoTrack
 	}
-	track.duration = uint32(tkhd.Duration)
 	track.trackId = tkhd.Track_ID
 	return
 }

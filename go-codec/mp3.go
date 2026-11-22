@@ -143,7 +143,7 @@ import (
 var BitRateTable [2][3][16]int = [2][3][16]int{
 	{
 		{0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, -1},
-		{0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 380, -1},
+		{0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, -1},
 		{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, -1},
 	},
 	{
@@ -198,8 +198,8 @@ type MP3FrameHead struct {
 }
 
 func DecodeMp3Head(data []byte) (*MP3FrameHead, error) {
-	if len(data) == 0 {
-		return nil, errors.New("empty mp3 frame")
+	if len(data) < 4 {
+		return nil, errors.New("mp3 header shorter than 4 bytes")
 	}
 	bs := NewBitStream(data)
 	syncWord := bs.GetBits(11)

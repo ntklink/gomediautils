@@ -71,7 +71,7 @@ func (muxer *PSMuxer) Write(sid uint8, frame []byte, pts uint64, dts uint64) err
 				nalu_type := codec.H264NaluTypeWithoutStartCode(nalu)
 				if nalu_type == codec.H264_NAL_AUD {
 					withaud = true
-					return false
+					return true
 				} else if codec.IsH264VCLNaluType(nalu_type) {
 					if nalu_type == codec.H264_NAL_I_SLICE {
 						idr_flag = true
@@ -84,7 +84,7 @@ func (muxer *PSMuxer) Write(sid uint8, frame []byte, pts uint64, dts uint64) err
 				nalu_type := codec.H265NaluTypeWithoutStartCode(nalu)
 				if nalu_type == codec.H265_NAL_AUD {
 					withaud = true
-					return false
+					return true
 				} else if codec.IsH265VCLNaluType(nalu_type) {
 					if nalu_type >= codec.H265_NAL_SLICE_BLA_W_LP && nalu_type <= codec.H265_NAL_SLICE_CRA {
 						idr_flag = true

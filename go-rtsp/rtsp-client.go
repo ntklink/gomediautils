@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,6 +61,8 @@ type RtspClient struct {
 	passwd           string
 	isRecord         bool
 	cseq             int32
+	outMu            sync.Mutex
+	reqMu            sync.Mutex
 	auth             authenticate
 	output           OutPutCallBack
 	lastRequest      *RtspRequest
@@ -138,7 +141,20 @@ func (client *RtspClient) GetTrack(trackName string) (track *RtspTrack, found bo
 }
 
 func (client *RtspClient) SetOutput(output OutPutCallBack) {
+	client.outMu.Lock()
 	client.output = output
+	client.outMu.Unlock()
+}
+
+func (client *RtspClient) hasOutput() bool {
+	client.outMu.Lock()
+	ok := client.output != nil
+	client.outMu.Unlock()
+	return ok
+}
+
+func (client *RtspClient) nextCSeq() int32 {
+	return atomic.AddInt32(&client.cseq, 1) - 1
 }
 
 func (client *RtspClient) SessionDescribe() string {
@@ -150,9 +166,8 @@ func (client *RtspClient) SetSessionDescribe(sdp *sdp.Sdp) {
 }
 
 func (client *RtspClient) Start() error {
-	req := makeOptions(client.uri, client.cseq)
-	client.reponseHandler = client.handleOption
-	return client.sendRtspRequest(&req)
+	req := makeOptions(client.uri, client.nextCSeq())
+	return client.sendRtspRequestWithHandler(&req, client.handleOption)
 }
 
 func (client *RtspClient) Input(data []byte) (err error) {
@@ -187,6 +202,11 @@ func (client *RtspClient) Input(data []byte) (err error) {
 	if len(buf) == 0 {
 		client.cache = client.cache[:0]
 		return
+	}
+
+	if len(buf) > maxRtspBufferSize {
+		client.cache = client.cache[:0]
+		return errRtspBufferOverflow
 	}
 
 	if cap(client.cache) >= len(buf) {
@@ -237,27 +257,22 @@ func (client *RtspClient) EnableRTCP() {
 func (client *RtspClient) KeepAlive(method string) error {
 	switch method {
 	case OPTIONS:
-		req := makeOptions(client.uri, client.cseq)
-		req.Fileds[Session] = client.sessionId
-		client.reponseHandler = client.handleOption
-		return client.sendRtspRequest(&req)
+		req := makeOptions(client.uri, client.nextCSeq())
+		return client.sendRtspRequestWithHandler(&req, client.handleOption)
 	case GET_PARAMETER:
-		req := makeGetParameter(client.uri, client.cseq)
-		req.Fileds[Session] = client.sessionId
-		client.reponseHandler = client.handleGetParameter
-		return client.sendRtspRequest(&req)
+		req := makeGetParameter(client.uri, client.nextCSeq())
+		return client.sendRtspRequestWithHandler(&req, client.handleGetParameter)
 	case SET_PARAMETER:
-		req := makeSetParameter(client.uri, client.cseq)
-		req.Fileds[Session] = client.sessionId
-		client.reponseHandler = client.handleSetParameter
-		return client.sendRtspRequest(&req)
+		req := makeSetParameter(client.uri, client.nextCSeq())
+		return client.sendRtspRequestWithHandler(&req, client.handleSetParameter)
 	}
 	return errors.New("unsupport keepalive method")
 }
 
-func (client *RtspClient) sendRtspRequest(req *RtspRequest) error {
+func (client *RtspClient) sendRtspRequestWithHandler(req *RtspRequest, handler func(res *RtspResponse) error) error {
+	client.reqMu.Lock()
+	client.reponseHandler = handler
 	client.lastRequest = req
-	atomic.AddInt32(&client.cseq, 1)
 	if client.auth != nil {
 		client.auth.setMethod(req.Method)
 		client.auth.setUri(req.Uri)
@@ -266,12 +281,33 @@ func (client *RtspClient) sendRtspRequest(req *RtspRequest) error {
 	if client.sessionId != "" {
 		req.Fileds[Session] = client.sessionId
 	}
-	return client.sendToServer([]byte(req.Encode()))
+	encoded := []byte(req.Encode())
+	client.reqMu.Unlock()
+	return client.sendToServer(encoded)
+}
+
+func (client *RtspClient) sendRtspRequest(req *RtspRequest) error {
+	client.reqMu.Lock()
+	client.lastRequest = req
+	if client.auth != nil {
+		client.auth.setMethod(req.Method)
+		client.auth.setUri(req.Uri)
+		req.Fileds[Authorization] = client.auth.authenticateInfo()
+	}
+	if client.sessionId != "" {
+		req.Fileds[Session] = client.sessionId
+	}
+	encoded := []byte(req.Encode())
+	client.reqMu.Unlock()
+	return client.sendToServer(encoded)
 }
 
 func (client *RtspClient) sendToServer(data []byte) error {
-	if client.output != nil {
-		return client.output(data)
+	client.outMu.Lock()
+	cb := client.output
+	client.outMu.Unlock()
+	if cb != nil {
+		return cb(data)
 	}
 	return nil
 }
@@ -333,11 +369,14 @@ func (client *RtspClient) handleResponse(res []byte) (ret int, err error) {
 	if response.StatusCode == 401 {
 		return ret, client.handleUnAuth(response)
 	}
+	client.reqMu.Lock()
 	client.authRetry = 0
-	if client.reponseHandler == nil {
+	handler := client.reponseHandler
+	client.reqMu.Unlock()
+	if handler == nil {
 		return ret, nil
 	}
-	return ret, client.reponseHandler(&response)
+	return ret, handler(&response)
 }
 
 func (client *RtspClient) handleRequest(req []byte) (ret int, err error) {
@@ -360,21 +399,25 @@ func (client *RtspClient) handleRequest(req []byte) (ret int, err error) {
 }
 
 func (client *RtspClient) handleUnAuth(response RtspResponse) error {
-
 	if _, found := response.Fileds[WWWAuthenticate]; !found {
 		return errors.New("need WWW-Authenticate")
 	}
+	client.reqMu.Lock()
 	if client.lastRequest == nil {
+		client.reqMu.Unlock()
 		return errors.New("got 401 without a pending request")
 	}
 	if client.authRetry >= maxAuthRetry {
-		return fmt.Errorf("rtsp authentication failed for %s (status 401)", client.lastRequest.Uri)
+		uri := client.lastRequest.Uri
+		client.reqMu.Unlock()
+		return fmt.Errorf("rtsp authentication failed for %s (status 401)", uri)
 	}
 	client.authRetry++
 
 	if client.auth == nil {
 		auth, err := createAuthByAuthenticate(response.Fileds[WWWAuthenticate])
 		if err != nil {
+			client.reqMu.Unlock()
 			return err
 		}
 		client.auth = auth
@@ -383,13 +426,15 @@ func (client *RtspClient) handleUnAuth(response RtspResponse) error {
 	client.auth.setMethod(client.lastRequest.Method)
 	client.auth.setUri(client.lastRequest.Uri)
 	if err := client.auth.decode(response.Fileds[WWWAuthenticate]); err != nil {
+		client.reqMu.Unlock()
 		return err
 	}
-	client.lastRequest.Fileds.Add(CSeq, client.cseq)
+	client.lastRequest.Fileds.Add(CSeq, client.nextCSeq())
 	client.lastRequest.Fileds[Date] = time.Now().UTC().Format("02 Jan 06 15:04:05 GMT")
 	client.lastRequest.Fileds[Authorization] = client.auth.authenticateInfo()
-	atomic.AddInt32(&client.cseq, 1)
-	return client.sendToServer([]byte(client.lastRequest.Encode()))
+	encoded := []byte(client.lastRequest.Encode())
+	client.reqMu.Unlock()
+	return client.sendToServer(encoded)
 }
 
 func (client *RtspClient) handleOption(res *RtspResponse) error {
@@ -415,17 +460,15 @@ func (client *RtspClient) handleOption(res *RtspResponse) error {
 		if !hasRecordAbility(client.serverCapability) {
 			return fmt.Errorf("server capability:%s ,unsupport Record mode ", res.Fileds[Public])
 		}
-		announce := makeAnnounce(client.uri, client.cseq)
+		announce := makeAnnounce(client.uri, client.nextCSeq())
 		announce.Body = client.SessionDescribe()
-		client.reponseHandler = client.handleAnnounce
-		return client.sendRtspRequest(&announce)
+		return client.sendRtspRequestWithHandler(&announce, client.handleAnnounce)
 	} else {
 		if !hasPlayAbility(client.serverCapability) {
 			return fmt.Errorf("server capability:%s ,unsupport Play mode ", res.Fileds[Public])
 		}
-		describe := makeDescribe(client.uri, client.cseq)
-		client.reponseHandler = client.handleDescribe
-		return client.sendRtspRequest(&describe)
+		describe := makeDescribe(client.uri, client.nextCSeq())
+		return client.sendRtspRequestWithHandler(&describe, client.handleDescribe)
 	}
 }
 
@@ -530,7 +573,7 @@ func (client *RtspClient) sendNextSetup() (sent bool, err error) {
 		if !found || !track.isOpen {
 			continue
 		}
-		req := makeSetup(media.ControlUrl, client.cseq)
+		req := makeSetup(media.ControlUrl, client.nextCSeq())
 		if track.transport == nil {
 			track.transport = NewRtspTransport(WithTcpInterleaved([2]int{i * 2, i*2 + 1}))
 		}
@@ -545,8 +588,7 @@ func (client *RtspClient) sendNextSetup() (sent bool, err error) {
 		}
 		req.Fileds[Transport] = track.transport.EncodeString()
 		client.setupStep = i + 1
-		client.reponseHandler = client.handleSetup
-		return true, client.sendRtspRequest(&req)
+		return true, client.sendRtspRequestWithHandler(&req, client.handleSetup)
 	}
 	return false, nil
 }
@@ -572,53 +614,53 @@ func (client *RtspClient) handleSetup(res *RtspResponse) error {
 		}
 		if res.StatusCode == Unsupported_Transport && lastTrack.transport.Proto != proto {
 			// retry the same media with the transport the handler switched to
-			req := makeSetup(lastMedia.ControlUrl, client.cseq)
+			req := makeSetup(lastMedia.ControlUrl, client.nextCSeq())
 			if lastTrack.transport.Proto == TCP && lastTrack.transport.Interleaved[0] == lastTrack.transport.Interleaved[1] {
 				lastTrack.transport.Interleaved[0] = lastIndex * 2
 				lastTrack.transport.Interleaved[1] = lastIndex*2 + 1
 			}
 			req.Fileds[Transport] = lastTrack.transport.EncodeString()
-			client.reponseHandler = client.handleSetup
-			return client.sendRtspRequest(&req)
+			return client.sendRtspRequestWithHandler(&req, client.handleSetup)
 		}
 		return nil
 	}
 	client.state = STATE_Ready
-	if client.handle != nil {
+	if !res.Fileds.Has(Session) {
+		return errors.New("session filed must in setup response")
+	}
 
-		if res.StatusCode == 200 && !res.Fileds.Has(Session) {
-			return errors.New("session filed must in setup response")
-		}
-
-		if client.sessionId == "" {
-			sessionId := ""
-			timeout := 60
-			if res.Fileds.Has(Session) {
-				sessionId = res.Fileds[Session]
-				param := strings.Split(sessionId, ";")
-				sessionId = param[0]
-				if len(param) > 1 {
-					to := strings.TrimSpace(param[1])
-					kv := strings.SplitN(to, "=", 2)
-					if len(kv) > 1 && strings.TrimSpace(kv[0]) == "timeout" {
-						if t, err := strconv.Atoi(strings.TrimSpace(kv[1])); err == nil {
-							timeout = t
-						}
-					}
+	client.reqMu.Lock()
+	if client.sessionId == "" {
+		sessionId := res.Fileds[Session]
+		timeout := 60
+		param := strings.Split(sessionId, ";")
+		sessionId = strings.TrimSpace(param[0])
+		if len(param) > 1 {
+			to := strings.TrimSpace(param[1])
+			kv := strings.SplitN(to, "=", 2)
+			if len(kv) > 1 && strings.TrimSpace(kv[0]) == "timeout" {
+				if t, err := strconv.Atoi(strings.TrimSpace(kv[1])); err == nil {
+					timeout = t
 				}
 			}
-			client.sessionId = sessionId
-			client.timeout = timeout
 		}
-		if err := lastTrack.transport.DecodeString(res.Fileds[Transport]); err != nil {
-			return err
-		}
-		if err := client.handle.HandleSetup(client, *res, lastTrack, client.tracks, client.sessionId, client.timeout); err != nil {
+		client.sessionId = sessionId
+		client.timeout = timeout
+	}
+	sessionId := client.sessionId
+	timeout := client.timeout
+	client.reqMu.Unlock()
+
+	if err := lastTrack.transport.DecodeString(res.Fileds[Transport]); err != nil {
+		return err
+	}
+	if client.handle != nil {
+		if err := client.handle.HandleSetup(client, *res, lastTrack, client.tracks, sessionId, timeout); err != nil {
 			return err
 		}
 	}
 
-	if client.output != nil && lastTrack.transport.Proto == TCP {
+	if client.hasOutput() && lastTrack.transport.Proto == TCP {
 		lastTrack.OnPacket(func(b []byte, isRtcp bool) error {
 			interleavedPacket := make([]byte, 4+len(b))
 			interleavedPacket[0] = '$'
@@ -630,7 +672,7 @@ func (client *RtspClient) handleSetup(res *RtspResponse) error {
 
 			binary.BigEndian.PutUint16(interleavedPacket[2:], uint16(len(b)))
 			copy(interleavedPacket[4:], b)
-			return client.output(interleavedPacket)
+			return client.sendToServer(interleavedPacket)
 		})
 	}
 
@@ -638,17 +680,12 @@ func (client *RtspClient) handleSetup(res *RtspResponse) error {
 		return err
 	}
 
-	var req *RtspRequest
 	if client.isRecord {
-		recordReq := makeRecord(client.uri, client.cseq)
-		req = &recordReq
-		client.reponseHandler = client.handleRecord
-	} else {
-		playReq := makePlay(client.sdpContext.ControlUrl, client.cseq)
-		req = &playReq
-		client.reponseHandler = client.handlePlay
+		recordReq := makeRecord(client.uri, client.nextCSeq())
+		return client.sendRtspRequestWithHandler(&recordReq, client.handleRecord)
 	}
-	return client.sendRtspRequest(req)
+	playReq := makePlay(client.sdpContext.ControlUrl, client.nextCSeq())
+	return client.sendRtspRequestWithHandler(&playReq, client.handlePlay)
 }
 
 func (client *RtspClient) handlePlay(res *RtspResponse) (err error) {

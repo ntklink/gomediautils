@@ -146,13 +146,13 @@ func (demuxer *Demuxer) Input(buf []byte) (err error) {
 			if stream.lost > 0 && page.isContinuePacket {
 				removeLen := 0
 				for ; idx < int(page.segmentsCount); idx++ {
+					removeLen += int(page.seqmentTable[idx])
 					if page.seqmentTable[idx] < 255 {
-						removeLen += int(page.seqmentTable[idx])
-					} else {
-						tmp = tmp[removeLen:]
+						idx++
 						break
 					}
 				}
+				tmp = tmp[removeLen:]
 			} else if stream.lost == 0 && page.isContinuePacket {
 				// finish the packet continued from the previous page: it ends at
 				// the first segment shorter than 255 bytes

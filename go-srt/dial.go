@@ -83,7 +83,7 @@ func readLoop(udp *net.UDPConn, c *Conn) {
 			c.mu.Unlock()
 			return
 		}
-		p, err := parsePacket(append([]byte(nil), buf[:n]...))
+		p, err := parsePacket(buf[:n])
 		if err != nil || p.dstSocket != c.socketID {
 			continue
 		}

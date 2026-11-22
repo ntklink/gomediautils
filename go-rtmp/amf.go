@@ -33,12 +33,16 @@ const (
 var NullItem []byte = []byte{byte(AMF0_NULL)}
 var EndObj []byte = []byte{0, 0, byte(AMF0_OBJECT_END)}
 
-const amf0MaxStringLen = 0xFFFF
+const (
+	amf0MaxStringLen = 0xFFFF
+	maxAmf0Depth     = 64
+)
 
 var (
 	errAmf0Truncated     = errors.New("amf0 data truncated")
 	errAmf0StringTooLong = errors.New("amf0: string longer than 65535 bytes")
 	errAmf0BadValue      = errors.New("amf0: value does not match its type marker")
+	errAmf0MaxDepth      = errors.New("amf0: nesting depth exceeded")
 )
 
 type amf0Item struct {
@@ -123,7 +127,10 @@ func (b *amf0Buf) bytes() ([]byte, error) {
 
 // amf0SkipObjectBody skips the (name, value) pairs of an object/ecma array body up to and
 // including the end marker, returns the number of bytes consumed
-func amf0SkipObjectBody(data []byte) (int, error) {
+func amf0SkipObjectBody(data []byte, depth int) (int, error) {
+	if depth >= maxAmf0Depth {
+		return 0, errAmf0MaxDepth
+	}
 	total := 0
 	for {
 		if len(data) < 3 {
@@ -136,7 +143,7 @@ func amf0SkipObjectBody(data []byte) (int, error) {
 		if len(data) < 2+nameLen {
 			return 0, errAmf0Truncated
 		}
-		l, err := amf0Skip(data[2+nameLen:])
+		l, err := amf0Skip(data[2+nameLen:], depth+1)
 		if err != nil {
 			return 0, err
 		}
@@ -146,7 +153,10 @@ func amf0SkipObjectBody(data []byte) (int, error) {
 }
 
 // amf0Skip returns the encoded size of the amf0 value at the start of data, without decoding it
-func amf0Skip(data []byte) (int, error) {
+func amf0Skip(data []byte, depth int) (int, error) {
+	if depth >= maxAmf0Depth {
+		return 0, errAmf0MaxDepth
+	}
 	if len(data) < 1 {
 		return 0, errAmf0Truncated
 	}
@@ -168,7 +178,7 @@ func amf0Skip(data []byte) (int, error) {
 		l := 3 + int(binary.BigEndian.Uint16(data[1:]))
 		return l, need(l)
 	case AMF0_OBJECT:
-		l, err := amf0SkipObjectBody(data[1:])
+		l, err := amf0SkipObjectBody(data[1:], depth+1)
 		return 1 + l, err
 	case AMF0_NULL, AMF0_UNDEFINED, AMF0_UNSUPPORTED:
 		return 1, nil
@@ -178,7 +188,7 @@ func amf0Skip(data []byte) (int, error) {
 		if err := need(5); err != nil {
 			return 0, err
 		}
-		l, err := amf0SkipObjectBody(data[5:])
+		l, err := amf0SkipObjectBody(data[5:], depth+1)
 		return 5 + l, err
 	case AMF0_OBJECT_END:
 		return 3, need(3)
@@ -189,7 +199,7 @@ func amf0Skip(data []byte) (int, error) {
 		count := int(binary.BigEndian.Uint32(data[1:]))
 		total := 5
 		for i := 0; i < count; i++ {
-			l, err := amf0Skip(data[total:])
+			l, err := amf0Skip(data[total:], depth+1)
 			if err != nil {
 				return 0, err
 			}
@@ -212,7 +222,7 @@ func amf0Skip(data []byte) (int, error) {
 		if err := need(3 + nameLen); err != nil {
 			return 0, err
 		}
-		l, err := amf0SkipObjectBody(data[3+nameLen:])
+		l, err := amf0SkipObjectBody(data[3+nameLen:], depth+1)
 		return 3 + nameLen + l, err
 	default:
 		return 0, fmt.Errorf("unsupport amf type %d", data[0])
@@ -221,7 +231,10 @@ func amf0Skip(data []byte) (int, error) {
 
 // decode parses one amf0 value, returns the number of bytes consumed. Nested/complex types are
 // skipped (value is nil), truncated input returns an error instead of panicking
-func (amf *amf0Item) decode(data []byte) (int, error) {
+func (amf *amf0Item) decode(data []byte, depth int) (int, error) {
+	if depth >= maxAmf0Depth {
+		return 0, errAmf0MaxDepth
+	}
 	if len(data) < 1 {
 		return 0, errAmf0Truncated
 	}
@@ -270,7 +283,7 @@ func (amf *amf0Item) decode(data []byte) (int, error) {
 	case AMF0_NULL, AMF0_UNDEFINED, AMF0_UNSUPPORTED:
 		return 1, nil
 	default:
-		l, err := amf0Skip(data)
+		l, err := amf0Skip(data, depth)
 		if err != nil {
 			return 0, err
 		}
@@ -332,7 +345,10 @@ func (object *amfObject) appendTo(dst []byte) ([]byte, error) {
 }
 
 // decodeBody parses (name, value) pairs up to and including the object end marker
-func (object *amfObject) decodeBody(data []byte) (int, error) {
+func (object *amfObject) decodeBody(data []byte, depth int) (int, error) {
+	if depth >= maxAmf0Depth {
+		return 0, errAmf0MaxDepth
+	}
 	total := 0
 	for {
 		if len(data) < 3 {
@@ -347,7 +363,7 @@ func (object *amfObject) decodeBody(data []byte) (int, error) {
 		}
 		name := string(data[2 : 2+length])
 		item := amf0Item{}
-		l, err := item.decode(data[2+length:])
+		l, err := item.decode(data[2+length:], depth+1)
 		if err != nil {
 			return 0, err
 		}
@@ -365,7 +381,7 @@ func (object *amfObject) decode(data []byte) (int, error) {
 	if len(data) < 1 {
 		return 0, errAmf0Truncated
 	}
-	l, err := object.decodeBody(data[1:])
+	l, err := object.decodeBody(data[1:], 0)
 	if err != nil {
 		return 0, err
 	}
@@ -386,7 +402,7 @@ func decodeAmf0(data []byte) (items []amf0Item, objs []amfObject, err error) {
 				return nil, nil, errAmf0Truncated
 			}
 			obj := amfObject{}
-			l, err = obj.decodeBody(data[5:])
+			l, err = obj.decodeBody(data[5:], 0)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -401,7 +417,7 @@ func decodeAmf0(data []byte) (items []amf0Item, objs []amfObject, err error) {
 			objs = append(objs, obj)
 		default:
 			item := amf0Item{}
-			l, err = item.decode(data)
+			l, err = item.decode(data, 0)
 			if err != nil {
 				return nil, nil, err
 			}

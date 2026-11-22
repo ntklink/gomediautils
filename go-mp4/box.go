@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 )
 
 const (
@@ -118,7 +119,7 @@ func (box *BasicBox) Decode(r io.Reader) (int, error) {
 	nn := 8
 	if boxsize == 1 {
 		if n, err := io.ReadFull(r, buf[8:]); err != nil {
-			return n, err
+			return n + nn, err
 		}
 		box.Size = binary.BigEndian.Uint64(buf[nn:])
 		nn += 8
@@ -194,7 +195,11 @@ func (box *FullBox) tableRemain(fixed int) (int64, error) {
 	if box.Box.Size < uint64(FullBoxLen+fixed) {
 		return 0, fmt.Errorf("mp4: box size %d too small", box.Box.Size)
 	}
-	return int64(box.Box.Size) - int64(FullBoxLen+fixed), nil
+	remain := box.Box.Size - uint64(FullBoxLen+fixed)
+	if remain > math.MaxInt64 {
+		return 0, fmt.Errorf("mp4: box size %d exceeds int64 range", box.Box.Size)
+	}
+	return int64(remain), nil
 }
 
 func (box *FullBox) Decode(r io.Reader) (int, error) {

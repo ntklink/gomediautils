@@ -34,6 +34,18 @@ type ListenConfig struct {
 	Backlog int
 }
 
+const (
+	hsWorkerCount = 8
+	hsQueueSize   = 64
+)
+
+type hsTask struct {
+	pkt  *packet
+	req  *handshake
+	addr *net.UDPAddr
+	key  string
+}
+
 // Listener accepts SRT connections on one UDP port.
 type Listener struct {
 	udp    *net.UDPConn
@@ -44,9 +56,12 @@ type Listener struct {
 	mu       sync.Mutex
 	conns    map[uint32]*Conn
 	byCaller map[string]*Conn
+	inFlight map[string]struct{}
 	accept   chan *Conn
 	closed   bool
 	done     chan struct{}
+	hsQueue  chan hsTask
+	wg       sync.WaitGroup
 }
 
 // Listen opens a listener on address, e.g. ":9000".
@@ -73,10 +88,16 @@ func Listen(address string, cfg ListenConfig) (*Listener, error) {
 		start:    time.Now(),
 		conns:    make(map[uint32]*Conn),
 		byCaller: make(map[string]*Conn),
+		inFlight: make(map[string]struct{}),
 		accept:   make(chan *Conn, cfg.Backlog),
 		done:     make(chan struct{}),
+		hsQueue:  make(chan hsTask, hsQueueSize),
 	}
 	rand.Read(l.secret)
+	for i := 0; i < hsWorkerCount; i++ {
+		go l.handshakeWorker()
+	}
+	l.wg.Add(1)
 	go l.readLoop()
 	return l, nil
 }
@@ -113,10 +134,24 @@ func (l *Listener) Close() error {
 	for _, c := range conns {
 		c.Close()
 	}
-	return l.udp.Close()
+	err := l.udp.Close()
+	l.wg.Wait()
+	return err
+}
+
+func (l *Listener) handshakeWorker() {
+	for {
+		select {
+		case <-l.done:
+			return
+		case task := <-l.hsQueue:
+			l.conclusion(task.pkt, task.req, task.addr, task.key)
+		}
+	}
 }
 
 func (l *Listener) readLoop() {
+	defer l.wg.Done()
 	buf := make([]byte, 2048)
 	for {
 		n, addr, err := l.udp.ReadFromUDP(buf)
@@ -126,12 +161,13 @@ func (l *Listener) readLoop() {
 			}
 			continue
 		}
-		p, err := parsePacket(append([]byte(nil), buf[:n]...))
+		p, err := parsePacket(buf[:n])
 		if err != nil {
 			continue
 		}
 		if p.dstSocket == 0 {
 			if p.control && p.ctrlType == ctrlHandshake {
+				p.payload = append([]byte(nil), p.payload...)
 				l.handshake(p, addr)
 			}
 			continue
@@ -203,12 +239,46 @@ func (l *Listener) handshake(p *packet, addr *net.UDPAddr) {
 		if req.cookie != l.cookie(addr, minute) && req.cookie != l.cookie(addr, minute-1) {
 			return
 		}
-		l.conclusion(p, req, addr)
+		key := fmt.Sprintf("%s/%d", addr, req.socketID)
+		l.mu.Lock()
+		if l.closed {
+			l.mu.Unlock()
+			return
+		}
+		if c := l.byCaller[key]; c != nil {
+			// the caller did not get our answer; send the same one again
+			resp := c.response
+			l.mu.Unlock()
+			l.udp.WriteToUDP(resp, addr)
+			return
+		}
+		if _, pending := l.inFlight[key]; pending {
+			l.mu.Unlock()
+			return
+		}
+		l.inFlight[key] = struct{}{}
+		l.mu.Unlock()
+		select {
+		case l.hsQueue <- hsTask{pkt: p, req: req, addr: addr, key: key}:
+		case <-l.done:
+			l.mu.Lock()
+			delete(l.inFlight, key)
+			l.mu.Unlock()
+		default:
+			// handshake queue full; caller will retry
+			l.mu.Lock()
+			delete(l.inFlight, key)
+			l.mu.Unlock()
+		}
 	}
 }
 
-func (l *Listener) conclusion(p *packet, req *handshake, addr *net.UDPAddr) {
-	key := fmt.Sprintf("%s/%d", addr, req.socketID)
+func (l *Listener) conclusion(p *packet, req *handshake, addr *net.UDPAddr, key string) {
+	defer func() {
+		l.mu.Lock()
+		delete(l.inFlight, key)
+		l.mu.Unlock()
+	}()
 	l.mu.Lock()
 	if l.closed {
 		l.mu.Unlock()
@@ -216,8 +286,9 @@ func (l *Listener) conclusion(p *packet, req *handshake, addr *net.UDPAddr) {
 	}
 	if c := l.byCaller[key]; c != nil {
 		// the caller did not get our answer; send the same one again
+		resp := c.response
 		l.mu.Unlock()
-		l.udp.WriteToUDP(c.response, addr)
+		l.udp.WriteToUDP(resp, addr)
 		return
 	}
 	l.mu.Unlock()
@@ -282,10 +353,18 @@ func (l *Listener) conclusion(p *packet, req *handshake, addr *net.UDPAddr) {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.closed {
+		l.mu.Unlock()
 		return
 	}
+	if c := l.byCaller[key]; c != nil {
+		// another worker already accepted this caller's conclusion
+		resp := c.response
+		l.mu.Unlock()
+		l.udp.WriteToUDP(resp, addr)
+		return
+	}
+	defer l.mu.Unlock()
 	if len(l.accept) == cap(l.accept) {
 		// nobody is accepting fast enough
 		l.reject(addr, req, RejectResource)

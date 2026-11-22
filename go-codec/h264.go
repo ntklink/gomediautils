@@ -127,9 +127,17 @@ func (sps *SPS) Decode(bs *BitStream) {
 		}
 	}
 	sps.Log2_max_frame_num_minus4 = bs.ReadUE()
+	if sps.Log2_max_frame_num_minus4 > 12 {
+		bs.Fail(errors.New("h264: log2_max_frame_num_minus4 > 12"))
+		return
+	}
 	sps.Pic_order_cnt_type = bs.ReadUE()
 	if sps.Pic_order_cnt_type == 0 {
 		sps.Log2_max_pic_order_cnt_lsb_minus4 = bs.ReadUE()
+		if sps.Log2_max_pic_order_cnt_lsb_minus4 > 12 {
+			bs.Fail(errors.New("h264: log2_max_pic_order_cnt_lsb_minus4 > 12"))
+			return
+		}
 	} else if sps.Pic_order_cnt_type == 1 {
 		sps.Delta_pic_order_always_zero_flag = bs.GetBit()
 		sps.Offset_for_non_ref_pic = bs.ReadSE()         // offset_for_non_ref_pic
@@ -229,14 +237,26 @@ type SEI struct {
 }
 
 func (sei *SEI) Decode(bs *BitStream) {
-	for bs.NextBits(8) == 0xFF {
-		sei.PayloadType += 255
+	for {
+		b := bs.Uint8(8)
+		if bs.Err() != nil {
+			return
+		}
+		sei.PayloadType += uint16(b)
+		if b != 0xFF {
+			break
+		}
 	}
-	sei.PayloadType += uint16(bs.Uint8(8))
-	for bs.NextBits(8) == 0xFF {
-		sei.PayloadSize += 255
+	for {
+		b := bs.Uint8(8)
+		if bs.Err() != nil {
+			return
+		}
+		sei.PayloadSize += uint16(b)
+		if b != 0xFF {
+			break
+		}
 	}
-	sei.PayloadSize += uint16(bs.Uint8(8))
 	if sei.PayloadType == 5 {
 		sei.Sei_payload = new(UserDataUnregistered)
 		sei.Sei_payload.Read(sei.PayloadSize, bs)

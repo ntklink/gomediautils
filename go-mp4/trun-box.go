@@ -221,7 +221,11 @@ func decodeTrunBox(demuxer *MovDemuxer, size uint32) (err error) {
 		} else {
 			cts = int64(entry.sampleCompositionTimeOffset)
 		}
-		sample.pts = uint64(int64(sample.dts) + cts)
+		pts := int64(sample.dts) + cts
+		if pts < 0 {
+			pts = 0
+		}
+		sample.pts = uint64(pts)
 		nextDts += uint64(delta)
 		demuxer.currentTrack.samplelist = append(demuxer.currentTrack.samplelist, sample)
 	}
@@ -266,7 +270,7 @@ func makeTrunBox(track *mp4track, start, end int, moofSize uint64) []byte {
 			if track.samplelist[j+1].dts-track.samplelist[j].dts != uint64(track.defaultDuration) {
 				flag |= TR_FLAG_DATA_SAMPLE_DURATION
 			}
-		} else {
+		} else if track.lastSample != nil && track.lastSample.dts > track.samplelist[j].dts {
 			if track.lastSample.dts-track.samplelist[j].dts != uint64(track.defaultDuration) {
 				flag |= TR_FLAG_DATA_SAMPLE_DURATION
 			}
@@ -288,7 +292,7 @@ func makeTrunBox(track *mp4track, start, end int, moofSize uint64) []byte {
 	for i := start; i < end; i++ {
 		sampleDuration := uint32(0)
 		if i == len(track.samplelist)-1 {
-			if track.lastSample != nil && track.lastSample.dts != 0 {
+			if track.lastSample != nil && track.lastSample.dts > track.samplelist[i].dts {
 				sampleDuration = uint32(track.lastSample.dts - track.samplelist[i].dts)
 			} else {
 				sampleDuration = track.defaultDuration

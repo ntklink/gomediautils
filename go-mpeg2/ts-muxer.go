@@ -323,6 +323,7 @@ func (mux *TSMuxer) writePES(pes *pes_stream, pmt *table_pmt, data []byte, pts u
 
 		}
 
+		var chunk []byte
 		if len(data)+headlen < TS_PAKCET_SIZE {
 			if adaptation == nil {
 				adaptation = new(Adaptation_field)
@@ -334,11 +335,12 @@ func (mux *TSMuxer) writePES(pes *pes_stream, pmt *table_pmt, data []byte, pts u
 				}
 			}
 			adaptation.Stuffing_byte = uint8(TS_PAKCET_SIZE - len(data) - headlen)
-			payload = append(payload, data...)
+			chunk = data
 			data = data[:0]
 		} else {
-			payload = append(payload, data[0:TS_PAKCET_SIZE-headlen]...)
-			data = data[TS_PAKCET_SIZE-headlen:]
+			n := TS_PAKCET_SIZE - headlen
+			chunk = data[:n]
+			data = data[n:]
 		}
 
 		if adaptation != nil {
@@ -347,10 +349,15 @@ func (mux *TSMuxer) writePES(pes *pes_stream, pmt *table_pmt, data []byte, pts u
 		}
 		tshdr.EncodeHeader(bsw)
 		if pespkg != nil {
-			pespkg.Pes_payload = payload
+			if len(payload) > 0 {
+				payload = append(payload, chunk...)
+				pespkg.Pes_payload = payload
+			} else {
+				pespkg.Pes_payload = chunk
+			}
 			pespkg.Encode(bsw)
 		} else {
-			bsw.PutBytes(payload)
+			bsw.PutBytes(chunk)
 		}
 		firstPesPacket = false
 		if err := mux.emit(bsw); err != nil {

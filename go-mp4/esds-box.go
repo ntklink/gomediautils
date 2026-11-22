@@ -98,9 +98,9 @@ func makeDecoderConfigDescriptor(cid MP4_CODEC_TYPE, vosData []byte) ([]byte, er
 	}
 	dcd := makeBaseDescriptor(0x04, 13+decoder_specific_info_len)
 	dcd[5] = objectType
-	if cid == MP4_CODEC_H264 || cid == MP4_CODEC_H265 {
+	if isVideo(cid) {
 		dcd[6] = 0x11
-	} else if cid == MP4_CODEC_G711A || cid == MP4_CODEC_G711U || cid == MP4_CODEC_AAC {
+	} else if isAudio(cid) {
 		dcd[6] = 0x15
 	} else {
 		dcd[6] = (0x38 << 2) | 1
@@ -140,11 +140,15 @@ func decodeESDescriptor(esd []byte, track *mp4track) (vosData []byte, err error)
 		case 0x03:
 			_ = bs.Uint8(16) // esId
 			streamDependenceFlag := bs.Uint8(1)
-			_ = bs.Uint8(1) // urlFlag
+			urlFlag := bs.Uint8(1)
 			oCRstreamFlag := bs.Uint8(1)
 			_ = bs.Uint8(5) //streamPriority
 			if streamDependenceFlag == 1 {
 				_ = bs.Uint8(16) // dependsOnEsId
+			}
+			if urlFlag == 1 {
+				urlLen := int(bs.Uint8(8))
+				bs.SkipBits(urlLen * 8)
 			}
 			if oCRstreamFlag == 1 {
 				_ = bs.Uint8(16) // oCREsId

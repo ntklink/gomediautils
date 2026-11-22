@@ -10,7 +10,7 @@ import (
 const (
 	UUIDPlayReady = "9a04f07998404286ab92e65be0885f95"
 	UUIDWidevine  = "edef8ba979d64acea3c827dcd51d21ed"
-	UUIDFairPlay  = "94CE86FB07FF4F43ADB893D2FA968CA2"
+	UUIDFairPlay  = "94ce86fb07ff4f43adb893d2fa968ca2"
 )
 
 // PsshBox - Protection System Specific Header Box

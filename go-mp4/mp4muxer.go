@@ -43,6 +43,7 @@ func (f MP4_FLAG) isDash() bool {
 type OnFragment func(duration uint32, firstPts, firstDts uint64)
 type Movmuxer struct {
 	writer         io.WriteSeeker
+	writerPos      *writerOffset
 	nextTrackId    uint32
 	nextFragmentId uint32
 	mdatOffset     uint32
@@ -123,6 +124,7 @@ func WithMehdVersion0() MuxerOption {
 func CreateMp4Muxer(w io.WriteSeeker, options ...MuxerOption) (*Movmuxer, error) {
 	muxer := &Movmuxer{
 		writer:         w,
+		writerPos:      &writerOffset{},
 		nextTrackId:    1,
 		nextFragmentId: 0,
 		tracks:         make(map[uint32]*mp4track),
@@ -167,6 +169,8 @@ func CreateMp4Muxer(w io.WriteSeeker, options ...MuxerOption) (*Movmuxer, error)
 		if err != nil {
 			return nil, err
 		}
+		muxer.writerPos.pos = currentOffset + int64(mdatlen)
+		muxer.writerPos.known = true
 	}
 	return muxer, nil
 }
@@ -234,8 +238,11 @@ func (muxer *Movmuxer) addTrack(cid MP4_CODEC_TYPE, options ...TrackOption) uint
 	var track *mp4track
 	if muxer.movFlag.isDash() || muxer.movFlag.isFragment() {
 		track = newmp4track(cid, newFmp4WriterSeeker(1024*1024))
+		track.writerPos.pos = 0
+		track.writerPos.known = true
 	} else {
 		track = newmp4track(cid, muxer.writer)
+		track.writerPos = muxer.writerPos
 	}
 	track.trackId = muxer.nextTrackId
 	muxer.tracks[muxer.nextTrackId] = track
@@ -346,6 +353,9 @@ func (muxer *Movmuxer) hasVideoTrack() bool {
 
 func (muxer *Movmuxer) ReBindWriter(w io.WriteSeeker) {
 	muxer.writer = w
+	if muxer.writerPos != nil {
+		muxer.writerPos.known = false
+	}
 }
 
 func (muxer *Movmuxer) OnNewFragment(onFragment OnFragment) {
@@ -362,6 +372,9 @@ func (muxer *Movmuxer) WriteInitSegment(w io.Writer) error {
 }
 
 func (muxer *Movmuxer) reWriteMdatSize() (err error) {
+	if muxer.writerPos != nil {
+		muxer.writerPos.known = false
+	}
 	var currentOffset int64
 	if currentOffset, err = muxer.writer.Seek(0, io.SeekCurrent); err != nil {
 		return err
@@ -631,6 +644,10 @@ func (muxer *Movmuxer) flushFragment() (err error) {
 		}
 		ws.buffer = ws.buffer[:0]
 		ws.offset = 0
+		if muxer.tracks[i].writerPos != nil {
+			muxer.tracks[i].writerPos.pos = 0
+			muxer.tracks[i].writerPos.known = true
+		}
 		muxer.tracks[i].clearSamples()
 	}
 	return nil

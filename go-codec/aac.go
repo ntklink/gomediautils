@@ -137,7 +137,7 @@ func (frame *ADTS_Frame_Header) Decode(aac []byte) error {
 	if len(aac) < 7 {
 		return errors.New("aac: adts header shorter than 7 bytes")
 	}
-	frame.Fix_Header.ID = aac[1] >> 3
+	frame.Fix_Header.ID = (aac[1] >> 3) & 0x01
 	frame.Fix_Header.Layer = aac[1] >> 1 & 0x03
 	frame.Fix_Header.Protection_absent = aac[1] & 0x01
 	frame.Fix_Header.Profile = aac[2] >> 6 & 0x03

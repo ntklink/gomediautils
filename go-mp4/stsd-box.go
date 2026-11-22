@@ -135,11 +135,14 @@ func decodeAudioSampleEntry(demuxer *MovDemuxer) (err error) {
 	track.chanelCount = uint8(entry.channelcount)
 	track.sampleBits = uint8(entry.samplesize)
 	track.sampleRate = entry.samplerate
-	quickTime := false
-	for _, brand := range demuxer.mp4Info.CompatibleBrands {
-		if brand == mov_tag([4]byte{'q', 't', ' ', ' '}) {
-			quickTime = true
-			break
+	qtBrand := mov_tag([4]byte{'q', 't', ' ', ' '})
+	quickTime := demuxer.mp4Info.MajorBrand == qtBrand
+	if !quickTime {
+		for _, brand := range demuxer.mp4Info.CompatibleBrands {
+			if brand == qtBrand {
+				quickTime = true
+				break
+			}
 		}
 	}
 	//ffmpeg mov.c mov_parse_stsd_audio

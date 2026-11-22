@@ -164,6 +164,9 @@ func (t *muxTrack) regroupPCM(data []byte, pts uint64) []muxBlock {
 	}
 	t.pcm = append(t.pcm, data...)
 	chunk := int(t.sampleRate) * int(t.channels) * pcmBlockMs / 1000
+	if chunk < 1 {
+		chunk = 1
+	}
 	for len(t.pcm) >= chunk {
 		block := append([]byte(nil), t.pcm[:chunk]...)
 		blocks = append(blocks, muxBlock{track: t, data: block, pts: t.pcmTime(t.pcmDone), key: true})
@@ -589,7 +592,9 @@ func (m *Muxer) WritePadded(track uint64, data []byte, pts uint64, dts uint64, d
 	if len(data) == 0 {
 		return nil
 	}
-	data = append([]byte(nil), data...)
+	if !m.headerWritten {
+		data = append([]byte(nil), data...)
+	}
 	blocks, err := m.toBlocks(t, data, pts)
 	if err != nil {
 		return err
@@ -764,7 +769,7 @@ func (m *Muxer) writeBlock(b muxBlock) error {
 		m.clusterStart = uint64(m.written - m.segmentDataAt)
 		m.cluster = append(m.cluster[:0], uintElement(idClusterTime, b.pts)...)
 		rel = 0
-		if cueTrack {
+		if cueTrack && m.ws != nil {
 			m.cues = append(m.cues, cuePoint{time: b.pts, track: b.track.number, position: m.clusterStart})
 		}
 	}
@@ -832,7 +837,13 @@ func (m *Muxer) flushCluster() error {
 		return nil
 	}
 	m.clusterOpen = false
-	return m.write(element(idCluster, m.cluster))
+	var hdr [12]byte
+	h := appendID(hdr[:0], idCluster)
+	h = appendSize(h, uint64(len(m.cluster)), sizeLen(uint64(len(m.cluster))))
+	if err := m.write(h); err != nil {
+		return err
+	}
+	return m.write(m.cluster)
 }
 
 // WriteTrailer flushes the last cluster and, for a seekable writer, writes

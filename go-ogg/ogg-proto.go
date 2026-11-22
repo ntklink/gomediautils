@@ -75,7 +75,7 @@ var crc_table [256]uint32 = [256]uint32{
 }
 
 func makeChecksum(crc uint32, buffer []byte) uint32 {
-	var checksum uint32
+	checksum := crc
 	for index := range buffer {
 		checksum = (checksum << 8) ^ crc_table[byte(checksum>>24)^buffer[index]]
 	}

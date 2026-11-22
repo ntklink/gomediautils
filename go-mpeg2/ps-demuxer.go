@@ -285,31 +285,38 @@ func (psdemuxer *PSDemuxer) demuxPespacket(stream *psstream, pes *PesPacket) err
 	case PS_STREAM_H264, PS_STREAM_H265:
 		return psdemuxer.demuxH26x(stream, pes)
 	case PS_STREAM_UNKNOW:
-		if stream.pts != pes.Pts {
+		hasPts := pes.PTS_DTS_flags&0x02 != 0
+		if hasPts && stream.pts != pes.Pts {
 			stream.streamBuf = stream.streamBuf[:0]
 		}
 		stream.streamBuf = append(stream.streamBuf, pes.Pes_payload...)
-		stream.pts = pes.Pts
-		stream.dts = pes.Dts
+		if hasPts {
+			stream.pts = pes.Pts
+			stream.dts = pes.Dts
+		}
 	}
 	return nil
 }
 
 func (psdemuxer *PSDemuxer) demuxAudio(stream *psstream, pes *PesPacket) error {
-	if stream.pts != pes.Pts && len(stream.streamBuf) > 0 {
+	hasPts := pes.PTS_DTS_flags&0x02 != 0
+	if hasPts && stream.pts != pes.Pts && len(stream.streamBuf) > 0 {
 		if psdemuxer.OnFrame != nil {
 			psdemuxer.OnFrame(stream.streamBuf, stream.cid, stream.pts/90, stream.dts/90)
 		}
 		stream.streamBuf = stream.streamBuf[:0]
 	}
 	stream.streamBuf = append(stream.streamBuf, pes.Pes_payload...)
-	stream.pts = pes.Pts
-	stream.dts = pes.Dts
+	if hasPts {
+		stream.pts = pes.Pts
+		stream.dts = pes.Dts
+	}
 	return nil
 }
 
 func (psdemuxer *PSDemuxer) demuxH26x(stream *psstream, pes *PesPacket) error {
-	if len(stream.streamBuf) == 0 {
+	hasPts := pes.PTS_DTS_flags&0x02 != 0
+	if len(stream.streamBuf) == 0 && hasPts {
 		stream.pts = pes.Pts
 		stream.dts = pes.Dts
 	}
@@ -317,8 +324,10 @@ func (psdemuxer *PSDemuxer) demuxH26x(stream *psstream, pes *PesPacket) error {
 	start, sc := codec.FindStartCode(stream.streamBuf, 0)
 	if start < 0 {
 		// no start code yet, keep buffering
-		stream.pts = pes.Pts
-		stream.dts = pes.Dts
+		if hasPts {
+			stream.pts = pes.Pts
+			stream.dts = pes.Dts
+		}
 		return nil
 	}
 	for {
@@ -349,7 +358,9 @@ func (psdemuxer *PSDemuxer) demuxH26x(stream *psstream, pes *PesPacket) error {
 		n := copy(stream.streamBuf, stream.streamBuf[start:])
 		stream.streamBuf = stream.streamBuf[:n]
 	}
-	stream.pts = pes.Pts
-	stream.dts = pes.Dts
+	if hasPts {
+		stream.pts = pes.Pts
+		stream.dts = pes.Dts
+	}
 	return nil
 }

@@ -162,15 +162,21 @@ func encodeLossList(seqs []uint32) []byte {
 
 // maxLossRange bounds how many sequence numbers one decoded NAK range may
 // name, so a corrupt report cannot demand billions of retransmissions.
-const maxLossRange = 1 << 16
+const (
+	maxLossRange         = 1 << 16
+	maxDecodedLossPerNak = senderBufSize
+)
 
-// decodeLossList calls fn for every sequence number a NAK reports lost.
+// decodeLossList calls fn for every sequence number a NAK reports lost,
+// capped at maxDecodedLossPerNak entries per packet.
 func decodeLossList(b []byte, fn func(seq uint32)) {
-	for len(b) >= 4 {
+	decoded := 0
+	for len(b) >= 4 && decoded < maxDecodedLossPerNak {
 		v := binary.BigEndian.Uint32(b)
 		b = b[4:]
 		if v&0x80000000 == 0 {
 			fn(v)
+			decoded++
 			continue
 		}
 		if len(b) < 4 {
@@ -182,8 +188,9 @@ func decodeLossList(b []byte, fn func(seq uint32)) {
 		if n < 0 || n > maxLossRange {
 			continue
 		}
-		for s, i := start, int32(0); i <= n; s, i = seqNext(s), i+1 {
+		for s, i := start, int32(0); i <= n && decoded < maxDecodedLossPerNak; s, i = seqNext(s), i+1 {
 			fn(s)
+			decoded++
 		}
 	}
 }

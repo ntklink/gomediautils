@@ -37,12 +37,13 @@ func (pkt *App) Decode(data []byte) error {
 	}
 
 	pkt.SubType = data[0] & 0x1F
-	if int(pkt.PayloadLen) < 8 {
+	pLen := pkt.payloadSize()
+	if pLen < 8 {
 		return errors.New("app rtcp packet need more data")
 	}
 	pkt.SSRC = binary.BigEndian.Uint32(data[4:])
 	pkt.Name = data[8:12]
-	pkt.AppData = data[12 : 4+pkt.PayloadLen]
+	pkt.AppData = data[12 : 4+pLen]
 	return nil
 }
 

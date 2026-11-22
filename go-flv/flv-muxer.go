@@ -11,7 +11,10 @@ import (
 // errShortSPS is reported when an SPS is too short to build an
 // AVCDecoderConfigurationRecord from (it needs the nal header plus the
 // profile, compatibility and level bytes).
-var errShortSPS = codec.ErrShortSPS
+var (
+	errShortSPS    = codec.ErrShortSPS
+	errTagTooLarge = errors.New("flv: tag data size exceeds 24-bit limit")
+)
 
 func WriteAudioTag(data []byte, cid FLV_SOUND_FORMAT, sampleRate int, channelCount int, isSequenceHeader bool) []byte {
 	var atag AudioTag
@@ -46,9 +49,8 @@ func WriteAudioTag(data []byte, cid FLV_SOUND_FORMAT, sampleRate int, channelCou
 	} else {
 		atag.AACPacketType = 1
 	}
-	hdr := atag.Encode()
-	tagData := make([]byte, 0, len(hdr)+len(data))
-	tagData = append(tagData, hdr...)
+	tagData := make([]byte, 0, atag.encodedSize()+len(data))
+	tagData = atag.appendTo(tagData)
 	tagData = append(tagData, data...)
 	return tagData
 }
@@ -63,7 +65,6 @@ func WriteVideoTag(data []byte, isKey bool, cid FLV_VIDEO_CODEC_ID, cts int32, i
 		vtag.FrameType = uint8(INTER_FRAME)
 	}
 
-	var hdr []byte
 	if cid == FLV_HEVC {
 		// hevc has no legacy codec id, so it goes out as an enhanced tag
 		if isSequenceHeader {
@@ -71,18 +72,19 @@ func WriteVideoTag(data []byte, isKey bool, cid FLV_VIDEO_CODEC_ID, cts int32, i
 		} else {
 			vtag.AVCPacketType = PacketTypeCodedFrames
 		}
-		hdr = vtag.EncodeEx(hevcFourCC)
-	} else {
-		if isSequenceHeader {
-			vtag.AVCPacketType = uint8(AVC_SEQUENCE_HEADER)
-		} else {
-			vtag.AVCPacketType = uint8(AVC_NALU)
-		}
-		hdr = vtag.Encode()
+		tagData := make([]byte, 0, vtag.encodedExSize()+len(data))
+		tagData = vtag.appendExTo(tagData, hevcFourCC)
+		tagData = append(tagData, data...)
+		return tagData
 	}
 
-	tagData := make([]byte, 0, len(hdr)+len(data))
-	tagData = append(tagData, hdr...)
+	if isSequenceHeader {
+		vtag.AVCPacketType = uint8(AVC_SEQUENCE_HEADER)
+	} else {
+		vtag.AVCPacketType = uint8(AVC_NALU)
+	}
+	tagData := make([]byte, 0, vtag.encodedSize()+len(data))
+	tagData = vtag.appendTo(tagData)
 	tagData = append(tagData, data...)
 	return tagData
 }
@@ -139,6 +141,7 @@ func (muxer *AVCMuxer) Write(frames []byte, pts uint32, dts uint32) ([][]byte, e
 	var vcl bool = false
 	var isKey bool = false
 	var err error
+	origLen := len(muxer.cache)
 	codec.SplitFrameWithStartCode(frames, func(nalu []byte) bool {
 		naltype := codec.H264NaluType(nalu)
 		switch naltype {
@@ -173,6 +176,7 @@ func (muxer *AVCMuxer) Write(frames []byte, pts uint32, dts uint32) ([][]byte, e
 		return true
 	})
 	if err != nil {
+		muxer.cache = muxer.cache[:origLen]
 		return nil, err
 	}
 
@@ -189,6 +193,7 @@ func (muxer *AVCMuxer) Write(frames []byte, pts uint32, dts uint32) ([][]byte, e
 		}
 		extraData, err := codec.CreateH264AVCCExtradata(spss, ppss)
 		if err != nil {
+			muxer.cache = muxer.cache[:origLen]
 			return nil, err
 		}
 		tags = append(tags, WriteVideoTag(extraData, true, FLV_AVC, 0, true))
@@ -203,9 +208,12 @@ func (muxer *AVCMuxer) Write(frames []byte, pts uint32, dts uint32) ([][]byte, e
 }
 
 type HevcMuxer struct {
-	hvcc  *codec.HEVCRecordConfiguration
-	cache []byte
-	first bool
+	hvcc   *codec.HEVCRecordConfiguration
+	cache  []byte
+	first  bool
+	hasVPS bool
+	hasSPS bool
+	hasPPS bool
 }
 
 func NewHevcMuxer() *HevcMuxer {
@@ -220,20 +228,32 @@ func (muxer *HevcMuxer) Write(frames []byte, pts uint32, dts uint32) ([][]byte, 
 	var vcl bool = false
 	var isKey bool = false
 	var err error
+	origLen := len(muxer.cache)
 	codec.SplitFrameWithStartCode(frames, func(nalu []byte) bool {
 		naltype := codec.H265NaluType(nalu)
 		switch naltype {
 		case codec.H265_NAL_SPS:
 			err = muxer.hvcc.UpdateSPS(nalu)
+			if err == nil {
+				muxer.hasSPS = true
+			}
 		case codec.H265_NAL_PPS:
 			err = muxer.hvcc.UpdatePPS(nalu)
+			if err == nil {
+				muxer.hasPPS = true
+			}
 		case codec.H265_NAL_VPS:
 			err = muxer.hvcc.UpdateVPS(nalu)
+			if err == nil {
+				muxer.hasVPS = true
+			}
 		default:
 			if naltype >= 16 && naltype <= 21 {
 				isKey = true
 			}
-			vcl = codec.IsH265VCLNaluType(naltype)
+			if codec.IsH265VCLNaluType(naltype) {
+				vcl = true
+			}
 		}
 		if err != nil {
 			return false
@@ -242,13 +262,15 @@ func (muxer *HevcMuxer) Write(frames []byte, pts uint32, dts uint32) ([][]byte, 
 		return true
 	})
 	if err != nil {
+		muxer.cache = muxer.cache[:origLen]
 		return nil, err
 	}
 
 	var tags [][]byte
-	if muxer.first && len(muxer.hvcc.Arrays) > 0 {
+	if muxer.first && muxer.hasVPS && muxer.hasSPS && muxer.hasPPS {
 		extraData, err := muxer.hvcc.Encode()
 		if err != nil {
+			muxer.cache = muxer.cache[:origLen]
 			return nil, err
 		}
 		tags = append(tags, WriteVideoTag(extraData, true, FLV_HEVC, 0, true))
@@ -298,7 +320,15 @@ func (muxer *AACMuxer) Write(frames []byte, pts uint32, dts uint32) ([][]byte, e
 			tags = append(tags, WriteAudioTag(asc.Encode(), FLV_AAC, 0, 0, true))
 			muxer.updateSequence = false
 		}
-		tags = append(tags, WriteAudioTag(aac[7:], FLV_AAC, 0, 0, false))
+		hdrLen := 7
+		if len(aac) >= 2 && aac[1]&0x01 == 0 {
+			hdrLen = 9
+		}
+		if len(aac) < hdrLen {
+			ascErr = errors.New("flv: aac adts frame shorter than header")
+			return
+		}
+		tags = append(tags, WriteAudioTag(aac[hdrLen:], FLV_AAC, 0, 0, false))
 	})
 	if err != nil {
 		return nil, err
@@ -458,13 +488,15 @@ func (muxer *FlvMuxer) WriteFrames(frameType TagType, frames []byte, pts uint32,
 	if err != nil {
 		return nil, err
 	}
-	tmptags := make([][]byte, 0, len(tags))
-	for _, tag := range tags {
+	for i, tag := range tags {
+		if len(tag) > 0xFFFFFF {
+			return nil, errTagTooLarge
+		}
 		ftag.DataSize = uint32(len(tag))
 		full := make([]byte, 0, int(FLVTAG_SIZE)+len(tag))
 		full = ftag.appendTo(full)
 		full = append(full, tag...)
-		tmptags = append(tmptags, full)
+		tags[i] = full
 	}
-	return tmptags, nil
+	return tags, nil
 }

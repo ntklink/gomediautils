@@ -257,6 +257,12 @@ func (cs *chunkStreamWriter) writeData(data []byte, msgType MessageType, streamI
 	if cs.csid > maxCsid {
 		return nil, fmt.Errorf("%w: %d", errInvalidCsid, cs.csid)
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if len(data) > maxRtmpMessageLen {
+		return nil, fmt.Errorf("rtmp: message length %d exceeds maximum %d", len(data), maxRtmpMessageLen)
+	}
 
 	lastChunk := cs.current
 	format := 0
@@ -287,10 +293,6 @@ func (cs *chunkStreamWriter) writeData(data []byte, msgType MessageType, streamI
 	lastChunk.msgHdr.msgStreamId = streamId
 	lastChunk.data = nil
 	cs.timestamp = ts
-
-	if len(data) == 0 {
-		return nil, nil
-	}
 
 	chunkSize := int(cs.chunkSize)
 	if chunkSize <= 0 {
@@ -525,15 +527,29 @@ func (reader *chunkStreamReader) readRtmpMessage(data []byte, onMsg func(*rtmpMe
 				} else {
 					cs.timestamp += cs.pkt.msgHdr.timestamp
 				}
+				const maxRetainedMsgCap = 64 * 1024
+				var payload []byte
+				if cap(cs.message) > maxRetainedMsgCap {
+					if cap(cs.message) <= msgLen*2 {
+						payload = cs.message[:msgLen]
+					} else {
+						payload = make([]byte, msgLen)
+						copy(payload, cs.message)
+					}
+					reader.buffered -= len(cs.message)
+					cs.message = nil
+				} else {
+					payload = make([]byte, msgLen)
+					copy(payload, cs.message)
+					reader.buffered -= len(cs.message)
+					cs.message = cs.message[:0]
+				}
 				msg := &rtmpMessage{
 					timestamp: cs.timestamp,
-					msg:       make([]byte, msgLen),
+					msg:       payload,
 					msgtype:   MessageType(cs.pkt.msgHdr.msgTypeId),
 					streamid:  cs.pkt.msgHdr.msgStreamId,
 				}
-				copy(msg.msg, cs.message)
-				reader.buffered -= len(cs.message)
-				cs.message = cs.message[:0]
 				if err := onMsg(msg); err != nil {
 					return err
 				}
@@ -543,4 +559,18 @@ func (reader *chunkStreamReader) readRtmpMessage(data []byte, onMsg func(*rtmpMe
 		}
 	}
 	return nil
+}
+
+func (reader *chunkStreamReader) abort(csid uint32) {
+	cs, ok := reader.cks[csid]
+	if !ok {
+		return
+	}
+	reader.buffered -= len(cs.message)
+	if reader.buffered < 0 {
+		reader.buffered = 0
+	}
+	cs.message = nil
+	cs.hdr = cs.hdr[:0]
+	cs.chunkRead = 0
 }

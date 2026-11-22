@@ -96,6 +96,7 @@ type TSDemuxer struct {
 	// esStreams indexes every elementary stream by its pid, so dispatching a
 	// ts packet is a single map lookup instead of a walk over every program
 	esStreams  map[uint16]*tsstream
+	probeBuf   [2 * TS_PAKCET_SIZE]byte
 	OnFrame    func(cid TS_STREAM_TYPE, frame []byte, pts uint64, dts uint64)
 	OnTSPacket func(pkg *TSPacket)
 }
@@ -136,109 +137,125 @@ func (demuxer *TSDemuxer) Input(r io.Reader) error {
 		if err := pkg.DecodeHeader(bs); err != nil {
 			return err
 		}
-		if pkg.PID == uint16(TS_PID_PAT) {
-			if pkg.Payload_unit_start_indicator == 1 {
-				bs.SkipBits(8)
-			}
-			section, serr := ReadSection(TS_TID_PAS, bs)
-			if serr != nil {
-				return serr
-			}
-			pat, ok := section.(*Pat)
-			if !ok {
-				return fmt.Errorf("mpeg2: pid 0 carries a %T instead of a pat", section)
-			}
-			pkg.Payload = pat
-			for _, pmt := range pat.Pmts {
-				if pmt.Program_number != 0x0000 {
-					if _, found := demuxer.programs[pmt.PID]; !found {
-						demuxer.programs[pmt.PID] = &tsprogram{pn: 0, streams: make(map[uint16]*tsstream)}
+		if pkg.Adaptation_field_control&0x01 != 0 {
+			if pkg.PID == uint16(TS_PID_PAT) {
+				if pkg.Payload_unit_start_indicator == 1 {
+					if bs.RemainBytes() < 1 {
+						return errParser
+					}
+					ptr := int(bs.Uint8(8))
+					if bs.RemainBytes() < ptr {
+						return errParser
+					}
+					bs.SkipBits(ptr * 8)
+				}
+				section, serr := ReadSection(TS_TID_PAS, bs)
+				if serr != nil {
+					return serr
+				}
+				pat, ok := section.(*Pat)
+				if !ok {
+					return fmt.Errorf("mpeg2: pid 0 carries a %T instead of a pat", section)
+				}
+				pkg.Payload = pat
+				for _, pmt := range pat.Pmts {
+					if pmt.Program_number != 0x0000 {
+						if _, found := demuxer.programs[pmt.PID]; !found {
+							demuxer.programs[pmt.PID] = &tsprogram{pn: 0, streams: make(map[uint16]*tsstream)}
+						}
 					}
 				}
-			}
-		} else if pkg.PID == uint16(TS_PID_Nil) {
-			continue
-		} else if prog, isPmt := demuxer.programs[pkg.PID]; isPmt {
-			if pkg.Payload_unit_start_indicator == 1 {
-				bs.SkipBits(8) //pointer filed
-			}
-			section, serr := ReadSection(TS_TID_PMS, bs)
-			if serr != nil {
-				return serr
-			}
-			pmt, ok := section.(*Pmt)
-			if !ok {
-				return fmt.Errorf("mpeg2: pid %d carries a %T instead of a pmt", pkg.PID, section)
-			}
-			pkg.Payload = pmt
-			prog.pn = pmt.Program_number
-			for _, ps := range pmt.Streams {
-				if _, found := prog.streams[ps.Elementary_PID]; !found {
-					stream := &tsstream{
-						cid:      TS_STREAM_TYPE(ps.StreamType),
-						pes_sid:  findPESIDByStreamType(TS_STREAM_TYPE(ps.StreamType)),
-						pes_pkg:  NewPesPacket(),
-						waitPUSI: true,
-						frameBeg: -1,
-					}
-					prog.streams[ps.Elementary_PID] = stream
-					demuxer.esStreams[ps.Elementary_PID] = stream
-				}
-			}
-		} else if stream, isEs := demuxer.esStreams[pkg.PID]; isEs {
-			if !stream.checkContinuity(&pkg) {
+			} else if pkg.PID == uint16(TS_PID_Nil) {
 				continue
-			}
-			start := pkg.Payload_unit_start_indicator
-			if start == 1 {
-				stream.hdrCache = stream.hdrCache[:0]
-				stream.waitPUSI = false
-				stream.pes_pkg.Pes_payload = nil
-				err := stream.pes_pkg.Decode(bs)
-				if err != nil {
-					if !errors.Is(err, errNeedMore) {
-						return err
+			} else if prog, isPmt := demuxer.programs[pkg.PID]; isPmt {
+				if pkg.Payload_unit_start_indicator == 1 {
+					if bs.RemainBytes() < 1 {
+						return errParser
 					}
-					if stream.pes_pkg.Pes_payload == nil {
-						// the PES header itself does not fit in this packet:
-						// buffer it and finish decoding with the next packet
-						stream.hdrCache = append(stream.hdrCache, bs.RemainData()...)
-						continue
+					ptr := int(bs.Uint8(8))
+					if bs.RemainBytes() < ptr {
+						return errParser
+					}
+					bs.SkipBits(ptr * 8)
+				}
+				section, serr := ReadSection(TS_TID_PMS, bs)
+				if serr != nil {
+					return serr
+				}
+				pmt, ok := section.(*Pmt)
+				if !ok {
+					return fmt.Errorf("mpeg2: pid %d carries a %T instead of a pmt", pkg.PID, section)
+				}
+				pkg.Payload = pmt
+				prog.pn = pmt.Program_number
+				for _, ps := range pmt.Streams {
+					if _, found := prog.streams[ps.Elementary_PID]; !found {
+						stream := &tsstream{
+							cid:      TS_STREAM_TYPE(ps.StreamType),
+							pes_sid:  findPESIDByStreamType(TS_STREAM_TYPE(ps.StreamType)),
+							pes_pkg:  NewPesPacket(),
+							waitPUSI: true,
+							frameBeg: -1,
+						}
+						prog.streams[ps.Elementary_PID] = stream
+						demuxer.esStreams[ps.Elementary_PID] = stream
 					}
 				}
-				pkg.Payload = stream.pes_pkg
-			} else if stream.waitPUSI {
-				// mid-frame data after a discontinuity (or before the first PUSI)
-				continue
-			} else if len(stream.hdrCache) > 0 {
-				stream.hdrCache = append(stream.hdrCache, bs.RemainData()...)
-				hbs := codec.NewBitStream(stream.hdrCache)
-				stream.pes_pkg.Pes_payload = nil
-				err := stream.pes_pkg.Decode(hbs)
-				if err != nil {
-					if !errors.Is(err, errNeedMore) {
-						stream.dropPartial()
-						return err
-					}
-					if stream.pes_pkg.Pes_payload == nil {
-						continue
-					}
+			} else if stream, isEs := demuxer.esStreams[pkg.PID]; isEs {
+				if !stream.checkContinuity(&pkg) {
+					continue
 				}
-				start = 1
-				pkg.Payload = stream.pes_pkg
-			} else {
-				stream.pes_pkg.Pes_payload = bs.RemainData()
-				pkg.Payload = bs.RemainData()
-			}
-			stype := findPESIDByStreamType(stream.cid)
-			if stype == PES_STREAM_AUDIO {
-				demuxer.doAudioPesPacket(stream, start)
-			} else if stype == PES_STREAM_VIDEO {
-				demuxer.doVideoPesPacket(stream, start)
-			}
-			if len(stream.hdrCache) > 0 {
-				// payload has been copied into the frame buffer
-				stream.hdrCache = stream.hdrCache[:0]
+				start := pkg.Payload_unit_start_indicator
+				if start == 1 {
+					stream.hdrCache = stream.hdrCache[:0]
+					stream.waitPUSI = false
+					stream.pes_pkg.Pes_payload = nil
+					err := stream.pes_pkg.Decode(bs)
+					if err != nil {
+						if !errors.Is(err, errNeedMore) {
+							return err
+						}
+						if stream.pes_pkg.Pes_payload == nil {
+							// the PES header itself does not fit in this packet:
+							// buffer it and finish decoding with the next packet
+							stream.hdrCache = append(stream.hdrCache, bs.RemainData()...)
+							continue
+						}
+					}
+					pkg.Payload = stream.pes_pkg
+				} else if stream.waitPUSI {
+					// mid-frame data after a discontinuity (or before the first PUSI)
+					continue
+				} else if len(stream.hdrCache) > 0 {
+					stream.hdrCache = append(stream.hdrCache, bs.RemainData()...)
+					hbs := codec.NewBitStream(stream.hdrCache)
+					stream.pes_pkg.Pes_payload = nil
+					err := stream.pes_pkg.Decode(hbs)
+					if err != nil {
+						if !errors.Is(err, errNeedMore) {
+							stream.dropPartial()
+							return err
+						}
+						if stream.pes_pkg.Pes_payload == nil {
+							continue
+						}
+					}
+					start = 1
+					pkg.Payload = stream.pes_pkg
+				} else {
+					stream.pes_pkg.Pes_payload = bs.RemainData()
+					pkg.Payload = bs.RemainData()
+				}
+				stype := findPESIDByStreamType(stream.cid)
+				if stype == PES_STREAM_AUDIO {
+					demuxer.doAudioPesPacket(stream, start)
+				} else if stype == PES_STREAM_VIDEO {
+					demuxer.doVideoPesPacket(stream, start)
+				}
+				if len(stream.hdrCache) > 0 {
+					// payload has been copied into the frame buffer
+					stream.hdrCache = stream.hdrCache[:0]
+				}
 			}
 		}
 		if demuxer.OnTSPacket != nil {
@@ -250,14 +267,14 @@ func (demuxer *TSDemuxer) Input(r io.Reader) error {
 }
 
 func (demuxer *TSDemuxer) probe(r io.Reader) ([]byte, error) {
-	buf := make([]byte, TS_PAKCET_SIZE, 2*TS_PAKCET_SIZE)
+	buf := demuxer.probeBuf[:TS_PAKCET_SIZE]
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return nil, err
 	}
 	if buf[0] == 0x47 {
 		return buf, nil
 	}
-	buf = buf[:2*TS_PAKCET_SIZE]
+	buf = demuxer.probeBuf[:2*TS_PAKCET_SIZE]
 	if _, err := io.ReadFull(r, buf[TS_PAKCET_SIZE:]); err != nil {
 		return nil, err
 	}
@@ -280,7 +297,7 @@ LOOP:
 	} else {
 		copy(buf, buf[TS_PAKCET_SIZE:])
 		if _, err := io.ReadFull(r, buf[TS_PAKCET_SIZE:]); err != nil {
-			return buf[:TS_PAKCET_SIZE], err
+			return nil, err
 		}
 		goto LOOP
 	}
@@ -388,6 +405,7 @@ func (demuxer *TSDemuxer) splitH26xFrame(stream *tsstream) bool {
 		}
 
 		newAccessUnit := false
+		isVCL := false
 		hdr := data[start+int(sct):]
 		if isH265 {
 			switch codec.H265NaluTypeWithoutStartCode(hdr) {
@@ -404,6 +422,7 @@ func (demuxer *TSDemuxer) splitH26xFrame(stream *tsstream) bool {
 				codec.H265_NAL_SLICE_BLA_W_LP, codec.H265_NAL_SLICE_BLA_W_RADL,
 				codec.H265_NAL_SLICE_BLA_N_LP, codec.H265_NAL_SLICE_IDR_W_RADL,
 				codec.H265_NAL_SLICE_IDR_N_LP, codec.H265_NAL_SLICE_CRA:
+				isVCL = true
 				// first_slice_segment_in_pic_flag starts a new picture
 				if stream.vcl > 0 {
 					if hdr[2]&0x80 > 0 {
@@ -422,6 +441,7 @@ func (demuxer *TSDemuxer) splitH26xFrame(stream *tsstream) bool {
 				}
 			case codec.H264_NAL_I_SLICE, codec.H264_NAL_P_SLICE,
 				codec.H264_NAL_SLICE_A, codec.H264_NAL_SLICE_B, codec.H264_NAL_SLICE_C:
+				isVCL = true
 				// first_mb_in_slice == 0 starts a new picture
 				if stream.vcl > 0 {
 					if hdr[1]&0x80 > 0 {
@@ -437,7 +457,11 @@ func (demuxer *TSDemuxer) splitH26xFrame(stream *tsstream) bool {
 			demuxer.emitAccessUnit(stream, data[stream.frameBeg:start])
 			stream.frameBeg = start
 			needUpdate = true
-			stream.vcl = 0
+			if isVCL {
+				stream.vcl = 1
+			} else {
+				stream.vcl = 0
+			}
 		}
 		stream.scanPos = start + 3
 	}

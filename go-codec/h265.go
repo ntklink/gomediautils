@@ -227,6 +227,10 @@ func (sps *H265RawSPS) Decode(nalu []byte) error {
 	sps.Bit_depth_luma_minus8 = bs.ReadUE()
 	sps.Bit_depth_chroma_minus8 = bs.ReadUE()
 	sps.Log2_max_pic_order_cnt_lsb_minus4 = bs.ReadUE()
+	if sps.Log2_max_pic_order_cnt_lsb_minus4 > 12 {
+		bs.Fail(errors.New("h265: log2_max_pic_order_cnt_lsb_minus4 > 12"))
+		return bs.Err()
+	}
 	sps.Sps_sub_layer_ordering_info_present_flag = bs.Uint8(1)
 	i := 0
 	if sps.Sps_sub_layer_ordering_info_present_flag == 0 {
@@ -496,7 +500,12 @@ func parse_rps(rps_idx int, nums_rps uint64, num_delta_pocs *[64]uint32, bs *Bit
 	} else {
 		num_negative_pics := bs.ReadUE()
 		num_positive_pics := bs.ReadUE()
-		if (num_negative_pics+num_positive_pics)*2 > uint64(bs.RemainBits()) {
+		if num_negative_pics > 16 || num_positive_pics > 16 {
+			bs.Fail(errors.New("h265: short term ref pic set exceeds max reference pictures"))
+			return
+		}
+		maxPics := uint64(max(bs.RemainBits(), 0)) / 2
+		if num_negative_pics > maxPics || num_positive_pics > maxPics-num_negative_pics {
 			bs.Fail(errors.New("h265: short term ref pic set exceeds the available data"))
 			return
 		}
@@ -583,7 +592,34 @@ func GetH265Resolution(sps []byte) (width uint32, height uint32, err error) {
 	if err = h265sps.Decode(sps[off:]); err != nil {
 		return 0, 0, err
 	}
-	return uint32(h265sps.Pic_width_in_luma_samples), uint32(h265sps.Pic_height_in_luma_samples), nil
+	width = uint32(h265sps.Pic_width_in_luma_samples)
+	height = uint32(h265sps.Pic_height_in_luma_samples)
+	if h265sps.Conformance_window_flag == 1 {
+		var subWidthC, subHeightC uint64 = 1, 1
+		if h265sps.Separate_colour_plane_flag == 0 {
+			switch h265sps.Chroma_format_idc {
+			case 1:
+				subWidthC, subHeightC = 2, 2
+			case 2:
+				subWidthC, subHeightC = 2, 1
+			}
+		}
+		if h265sps.Conf_win_left_offset < h265sps.Pic_width_in_luma_samples &&
+			h265sps.Conf_win_right_offset < h265sps.Pic_width_in_luma_samples {
+			cropW := subWidthC * (h265sps.Conf_win_left_offset + h265sps.Conf_win_right_offset)
+			if cropW < h265sps.Pic_width_in_luma_samples {
+				width = uint32(h265sps.Pic_width_in_luma_samples - cropW)
+			}
+		}
+		if h265sps.Conf_win_top_offset < h265sps.Pic_height_in_luma_samples &&
+			h265sps.Conf_win_bottom_offset < h265sps.Pic_height_in_luma_samples {
+			cropH := subHeightC * (h265sps.Conf_win_top_offset + h265sps.Conf_win_bottom_offset)
+			if cropH < h265sps.Pic_height_in_luma_samples {
+				height = uint32(h265sps.Pic_height_in_luma_samples - cropH)
+			}
+		}
+	}
+	return width, height, nil
 }
 
 func GetVPSIdWithStartCode(vps []byte) uint8 {
@@ -1045,7 +1081,7 @@ func (hvcc *HEVCRecordConfiguration) UpdateVPS(vps []byte) error {
 		needUpdate = true
 	}
 	if needUpdate {
-		hvcc.NumTemporalLayers = uint8(Max(int(hvcc.NumTemporalLayers), int(rawvps.Vps_max_layers_minus1+1)))
+		hvcc.NumTemporalLayers = uint8(Max(int(hvcc.NumTemporalLayers), int(rawvps.Vps_max_sub_layers_minus1+1)))
 		hvcc.updatePtl(rawvps.Ptl)
 	}
 	return nil

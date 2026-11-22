@@ -131,11 +131,11 @@ func (m *Media) ParseMLine(mediaLine string) error {
 	m.Ports = append(m.Ports, uint16(p))
 	if len(pn) > 1 {
 		numberOfPort, err := strconv.Atoi(pn[1])
-		if err != nil || numberOfPort < 0 {
+		if err != nil || numberOfPort < 1 || numberOfPort > 64 || p+numberOfPort-1 > 0xFFFF {
 			return errors.New("illegal number of ports in sdp m line: " + mediaLine)
 		}
 		for i := 1; i < numberOfPort; i++ {
-			m.Ports = append(m.Ports, uint16(p)+1)
+			m.Ports = append(m.Ports, uint16(p+i))
 		}
 	}
 	m.Proto = strs[2]

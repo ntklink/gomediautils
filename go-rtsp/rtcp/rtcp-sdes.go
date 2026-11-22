@@ -39,18 +39,27 @@ type ChunkItem struct {
 }
 
 func (item *ChunkItem) Encode() []byte {
-	data := make([]byte, 2+len(item.Txt))
+	txt := item.Txt
+	if len(txt) > 255 {
+		txt = txt[:255]
+	}
+	data := make([]byte, 2+len(txt))
 	data[0] = item.Type
-	data[1] = item.Length
-	copy(data[2:], item.Txt)
+	data[1] = uint8(len(txt))
+	copy(data[2:], txt)
 	return data
 }
 
 func MakeCNameItem(name []byte) *ChunkItem {
+	if len(name) > 255 {
+		name = name[:255]
+	}
+	txt := make([]byte, len(name))
+	copy(txt, name)
 	return &ChunkItem{
 		Type:   SDES_CNAME,
-		Length: uint8(len(name)),
-		Txt:    make([]byte, len(name)),
+		Length: uint8(len(txt)),
+		Txt:    txt,
 	}
 }
 
@@ -76,7 +85,7 @@ func (pkt *SourceDescription) Decode(data []byte) error {
 		return err
 	}
 	pkt.SC = data[0] & 0x1F
-	end := int(pkt.PayloadLen) + 4
+	end := pkt.payloadSize() + 4
 	offset := 4
 	pkt.Chunks = pkt.Chunks[:0]
 	for i := 0; i < int(pkt.SC); i++ {
@@ -114,10 +123,18 @@ func (pkt *SourceDescription) Encode() []byte {
 	for _, chk := range pkt.Chunks {
 		binary.BigEndian.PutUint32(data[offset:], chk.SSRC)
 		offset += 4
-		data[offset] = chk.Item.Type
-		data[offset+1] = chk.Item.Length
-		copy(data[offset+2:], chk.Item.Txt)
-		offset += 2 + len(chk.Item.Txt)
+		if chk.Item != nil {
+			txt := chk.Item.Txt
+			if len(txt) > 255 {
+				txt = txt[:255]
+			}
+			data[offset] = chk.Item.Type
+			data[offset+1] = uint8(len(txt))
+			copy(data[offset+2:], txt)
+			offset += 2 + len(txt)
+		}
+		// null-terminate (END=0) and pad chunk to a 32-bit boundary
+		offset = (offset + 1 + 3) &^ 3
 	}
 	return data
 }
@@ -125,13 +142,17 @@ func (pkt *SourceDescription) Encode() []byte {
 func (pkt *SourceDescription) calcLength() uint16 {
 	length := 0
 	for _, chk := range pkt.Chunks {
-		length += 4
-		length += int(chk.Item.Length) + 2
+		chunkLen := 4
+		if chk.Item != nil {
+			n := len(chk.Item.Txt)
+			if n > 255 {
+				n = 255
+			}
+			chunkLen += 2 + n
+		}
+		// 1-byte END marker + 0..3 bytes null padding to 32-bit boundary
+		chunkLen = (chunkLen + 1 + 3) &^ 3
+		length += chunkLen
 	}
-	length += 1
-	if length%4 == 0 {
-		return uint16(length) / 4
-	} else {
-		return uint16(length)/4 + 1
-	}
+	return uint16(length / 4)
 }
